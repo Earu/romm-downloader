@@ -1,0 +1,25 @@
+# Standalone deployment of romm-downloader. It talks to your RomM server and
+# TorBox purely over HTTP — no shared volumes with RomM required.
+#
+#   cp .env.example .env   # fill in ROMM_URL, ROMM_TOKEN, TORBOX_API_KEY, IGDB_*
+#   docker compose -f docker-compose.example.yml up -d --build
+services:
+  romm-downloader:
+    build: .
+    image: romm-downloader:latest
+    container_name: romm-downloader
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - ROMM_URL=${ROMM_URL}
+      - ROMM_TOKEN=${ROMM_TOKEN}
+      - TORBOX_API_KEY=${TORBOX_API_KEY}
+      - IGDB_CLIENT_ID=${IGDB_CLIENT_ID:-}
+      - IGDB_CLIENT_SECRET=${IGDB_CLIENT_SECRET:-}
+    volumes:
+      # Persists the SQLite DB (jobs/settings) and in-flight downloads.
+      - romm_downloader_data:/app/data
+
+volumes:
+  romm_downloader_data:
