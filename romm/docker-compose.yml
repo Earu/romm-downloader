@@ -1,0 +1,58 @@
+# Dev-only RomM stack — the live target for developing romm-downloader.
+# Runs inside the Ubuntu-24.04 WSL distro's Docker Engine.
+# Uses named volumes (native ext4) for performance; the app talks to RomM over
+# HTTP at http://localhost:8080 (WSL2 forwards localhost to Windows).
+#
+# Bring up:   wsl -d Ubuntu-24.04 -u root -e bash -lc "cd /mnt/c/Users/Earu/Documents/GitHub/romm-downloader/romm && docker compose up -d"
+# Logs:       docker compose logs -f romm
+# Tear down:  docker compose down            (add -v to wipe data)
+services:
+  romm:
+    image: rommapp/romm:latest
+    container_name: romm
+    restart: unless-stopped
+    environment:
+      - DB_HOST=romm-db
+      - DB_NAME=romm
+      - DB_USER=romm-user
+      - DB_PASSWD=${MARIADB_PASSWORD}
+      - ROMM_AUTH_SECRET_KEY=${ROMM_AUTH_SECRET_KEY}
+      # Optional: enable metadata (IGDB) — also powers our catalog via RomM proxy.
+      - IGDB_CLIENT_ID=${IGDB_CLIENT_ID:-}
+      - IGDB_CLIENT_SECRET=${IGDB_CLIENT_SECRET:-}
+    ports:
+      - "8080:8080"
+    volumes:
+      - romm_resources:/romm/resources
+      - romm_redis_data:/redis-data
+      - romm_library:/romm/library
+      - romm_assets:/romm/assets
+      - romm_config:/romm/config
+    depends_on:
+      romm-db:
+        condition: service_healthy
+
+  romm-db:
+    image: mariadb:latest
+    container_name: romm-db
+    restart: unless-stopped
+    environment:
+      - MARIADB_ROOT_PASSWORD=${MARIADB_ROOT_PASSWORD}
+      - MARIADB_DATABASE=romm
+      - MARIADB_USER=romm-user
+      - MARIADB_PASSWORD=${MARIADB_PASSWORD}
+    volumes:
+      - romm_db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  romm_resources:
+  romm_redis_data:
+  romm_library:
+  romm_assets:
+  romm_config:
+  romm_db_data:

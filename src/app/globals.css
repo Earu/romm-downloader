@@ -1,0 +1,99 @@
+@import "tailwindcss";
+
+/*
+ * SteamOS Big Picture theme: flat, sharp-cornered, dark and neutral. No rounded
+ * corners and no gradients on surfaces/controls — solid fills only. A restrained
+ * bright-blue accent is used for focus, links and progress.
+ */
+@theme {
+  --color-steam-navy: #0c0e11;       /* top bar / sidebar chrome */
+  --color-steam-deep: #16181c;       /* hero / large surfaces */
+  --color-steam-slate: #1a1d21;      /* page top */
+  --color-steam-panel: #181b1f;      /* flat panel fill */
+  --color-steam-panel-2: #3a4049;    /* raised control / neutral gray button */
+  --color-steam-row: #1d2125;        /* list row (neutral gray) */
+  --color-steam-hover: #272b31;      /* row / item hover */
+  --color-steam-line: #ffffff10;     /* hairline divider */
+  --color-steam-blue: #1a9fff;
+  --color-steam-blue-light: #66c0f4;
+  --color-steam-green: #5ba32b;
+  --color-steam-green-light: #a1cd44;
+  --color-steam-text: #c6d4e1;
+  --color-steam-bright: #ffffff;
+  --color-steam-muted: #6d7883;
+
+  --font-sans: var(--font-manrope), "Motiva Sans", ui-sans-serif, system-ui,
+    -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+html,
+body {
+  color: var(--color-steam-text);
+  min-height: 100vh;
+}
+
+body {
+  /* Dark, neutral SteamOS gradient — subtle, fading to near-black. */
+  background:
+    radial-gradient(1300px 720px at 50% -10%, rgba(52, 58, 66, 0.18), transparent 56%),
+    linear-gradient(180deg, #1a1d21 0%, #121417 46%, #0b0d10 100%);
+  background-attachment: fixed;
+  font-family: var(--font-sans);
+}
+
+/* Slim, tinted scrollbars to match the dark chrome. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #2c343d transparent;
+}
+*::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #2c343d;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: #3c4651;
+  background-clip: padding-box;
+}
+
+@layer components {
+  /* Flat solid surface — panels and heroes. No rounding, no gradient. */
+  .steam-panel {
+    @apply border border-black/40 bg-steam-panel shadow-[0_1px_3px_rgba(0,0,0,0.4)];
+  }
+
+  /* Text input / select. */
+  .steam-input {
+    @apply border border-black/50 bg-[#0b0e12] px-3 py-2 text-sm text-steam-text outline-none transition;
+  }
+  .steam-input::placeholder {
+    @apply text-steam-muted/70;
+  }
+  .steam-input:focus {
+    @apply border-steam-blue/70 bg-[#080b0f];
+  }
+
+  /* Neutral button — flat raised control. Chunky for controller/console use. */
+  .steam-btn {
+    @apply inline-flex cursor-pointer items-center justify-center gap-2 border border-black/40 bg-steam-panel-2 px-6 py-2.5 text-[15px] font-semibold text-steam-bright transition hover:bg-[#474e58] disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  /* Primary action — flat Steam blue. */
+  .steam-btn-primary {
+    @apply inline-flex cursor-pointer items-center justify-center gap-2 border-0 bg-steam-blue px-6 py-2.5 text-[15px] font-semibold text-white transition hover:bg-steam-blue-light disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  /* Green "go" action (acquire / download). */
+  .steam-btn-green {
+    @apply inline-flex cursor-pointer items-center justify-center gap-2 border-0 bg-[#57902a] px-6 py-2.5 text-[15px] font-semibold text-white transition hover:bg-[#67a531] disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  /* Small uppercase shelf header (SteamOS row label). */
+  .steam-shelf-title {
+    @apply text-xs font-semibold uppercase tracking-[0.18em] text-steam-muted;
+  }
+}
