@@ -167,12 +167,19 @@ export async function resolveMagnet(fullPath: string): Promise<MinervaResolved> 
     const soIdStr = soIdNum != null ? String(soIdNum) : "";
     const torrents = row.torrents ? String(row.torrents) : "";
 
+    // The .torrent on Minerva carries the full (working) tracker announce list,
+    // so we expose it alongside the magnet — the built-in torrent client uses it
+    // because our hardcoded magnet trackers are largely dead.
+    const torrentUrl = torrents
+      ? `${MINERVA_BASE}/assets/${torrents.split("/").map(encodeURIComponent).join("/")}`
+      : undefined;
+
     if (rawMagnet) {
       const magnet = `${rawMagnet}${MINERVA_TRACKERS}${soIdStr ? `&so=${soIdStr}` : ""}`;
-      return { fileName, size, magnet, soId: soIdNum };
+      return { fileName, size, magnet, torrentUrl, soId: soIdNum };
     }
-    if (torrents) {
-      return { fileName, size, torrentUrl: `${MINERVA_BASE}/assets/${torrents}`, soId: soIdNum };
+    if (torrentUrl) {
+      return { fileName, size, torrentUrl, soId: soIdNum };
     }
     throw new Error(`No magnet or torrent for: ${fullPath}`);
   } finally {

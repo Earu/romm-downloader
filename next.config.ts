@@ -17,7 +17,7 @@ const nextConfig: NextConfig = {
   // `unzipper` has an optional `@aws-sdk/client-s3` require (its S3 open mode,
   // which we never use); keeping it external stops the bundler from trying to
   // resolve that dependency at build time.
-  serverExternalPackages: ["@libsql/client", "unzipper", "webtorrent"],
+  serverExternalPackages: ["@libsql/client", "unzipper"],
 };
 
 export default nextConfig;

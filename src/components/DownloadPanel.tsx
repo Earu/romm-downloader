@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { IconPlay, Spinner } from "@/components/icons";
 import { KNOWN_PLATFORMS, type KnownPlatform } from "@/lib/platforms";
@@ -36,6 +37,7 @@ function filterPlatforms(query: string): KnownPlatform[] {
 }
 
 export function DownloadPanel({ game, rommPlatforms, suggestedSlug }: Props) {
+  const router = useRouter();
   const [query, setQuery] = useState(game.name);
   const [results, setResults] = useState<MinervaResult[]>([]);
   const [selected, setSelected] = useState<MinervaResult | null>(null);
@@ -145,6 +147,7 @@ export function DownloadPanel({ game, rommPlatforms, suggestedSlug }: Props) {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
       setStatus("queued");
+      router.push("/downloads");
     } catch (e) {
       setStatus("error");
       setMessage(e instanceof Error ? e.message : String(e));
@@ -290,7 +293,7 @@ export function DownloadPanel({ game, rommPlatforms, suggestedSlug }: Props) {
           ) : (
             <>
               <IconPlay className="h-4 w-4" />
-              Download to RomM
+              Download
             </>
           )}
         </button>
