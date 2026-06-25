@@ -12,6 +12,7 @@ export const JOB_STATES = [
   "caching", // debrid provider downloading/caching to its cloud
   "fetching", // streaming the file from the debrid provider to local tmp
   "unavailable", // debrid provider can't serve this file — awaiting user's fallback choice
+  "multi_file", // torrent has several files but no shared library to group them — awaiting user's choice
   "local_fetching", // downloading the file via the built-in torrent client (&so)
   "uploading", // chunked upload into RomM + scan
   "done",
@@ -38,9 +39,6 @@ export const downloadJobs = sqliteTable("download_jobs", {
   debridProvider: text("debrid_provider"), // which debrid service handled this job
   debridId: text("debrid_id"), // provider transfer id
   debridFileId: text("debrid_file_id"), // chosen file id within the transfer
-  // Legacy TorBox columns (superseded by debrid_* above).
-  torboxId: integer("torbox_id"),
-  torboxFileId: integer("torbox_file_id"),
   // Progress / status
   state: text("state").$type<JobState>().notNull().default("requested"),
   progress: integer("progress").notNull().default(0), // 0..100

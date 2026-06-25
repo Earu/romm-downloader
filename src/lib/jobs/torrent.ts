@@ -56,6 +56,23 @@ async function findFile(dir: string, name: string): Promise<string | null> {
   return null;
 }
 
+/** Recursively find the largest file under `dir` (ignoring aria2's control/source files). */
+async function findLargestFile(dir: string): Promise<string | null> {
+  let best: { path: string; size: number } | null = null;
+  const walk = async (d: string) => {
+    for (const e of await readdir(d, { withFileTypes: true }).catch(() => [])) {
+      const full = join(d, e.name);
+      if (e.isDirectory()) await walk(full);
+      else if (!e.name.startsWith(".") && !e.name.endsWith(".aria2")) {
+        const { size } = await stat(full).catch(() => ({ size: 0 }));
+        if (!best || size > best.size) best = { path: full, size };
+      }
+    }
+  };
+  await walk(dir);
+  return best ? (best as { path: string }).path : null;
+}
+
 /**
  * Download a single file out of a (possibly huge multi-file) torrent using
  * aria2c's `--select-file`, which fetches only that file's pieces (including the
@@ -157,10 +174,12 @@ export function downloadSelectedFile(
           await finish(new Error(`aria2c exited ${code}: ${stderrTail.trim().slice(-300)}`));
           return;
         }
-        // Locate the finished file (prefer aria2's reported path).
+        // Locate the finished file: aria2's reported path, else by release name,
+        // else (manual magnet with no known name) the largest downloaded file.
         const path =
           completePath ||
-          (releaseName ? await findFile(destDir, basename(releaseName)) : null);
+          (releaseName ? await findFile(destDir, basename(releaseName)) : null) ||
+          (await findLargestFile(destDir));
         if (!path) {
           await finish(new Error("aria2c finished but the downloaded file wasn't found"));
           return;

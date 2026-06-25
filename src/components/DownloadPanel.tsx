@@ -58,9 +58,13 @@ export function DownloadPanel({ game, rommPlatforms, suggestedSlug }: Props) {
   const rommBySlug = new Map(rommPlatforms.map((p) => [p.fsSlug, p]));
 
   const [includeAll, setIncludeAll] = useState(false);
+  const [manualMagnet, setManualMagnet] = useState("");
   const [status, setStatus] = useState<"idle" | "submitting" | "queued" | "error">("idle");
   const [message, setMessage] = useState("");
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const magnet = manualMagnet.trim();
+  const magnetValid = /^magnet:\?.*xt=urn:btih:/i.test(magnet);
 
   // Close combobox on outside click
   useEffect(() => {
@@ -111,6 +115,7 @@ export function DownloadPanel({ game, rommPlatforms, suggestedSlug }: Props) {
   // Picking a ROM result auto-selects its inferred platform in the combobox.
   const selectResult = (r: MinervaResult) => {
     setSelected(r);
+    setManualMagnet(""); // Minerva result and manual magnet are mutually exclusive
     if (r.platformSlug) {
       const p = KNOWN_PLATFORMS.find((kp) => kp.slug === r.platformSlug);
       if (p) {
@@ -121,7 +126,9 @@ export function DownloadPanel({ game, rommPlatforms, suggestedSlug }: Props) {
   };
 
   const submit = async () => {
-    if (!selected || !selectedPlatform) return;
+    // A pasted magnet takes precedence over a selected Minerva result.
+    const useMagnet = magnetValid;
+    if ((!useMagnet && !selected) || !selectedPlatform) return;
 
     const existing = rommBySlug.get(selectedPlatform.slug);
     const platformSlug = selectedPlatform.slug;
@@ -131,12 +138,13 @@ export function DownloadPanel({ game, rommPlatforms, suggestedSlug }: Props) {
     setMessage("");
     try {
       const body: Record<string, unknown> = {
-        minervaPath: selected.fullPath,
-        title: selected.fileName,
+        title: useMagnet ? game.name : selected!.fileName,
         catalogGameId: game.id,
         coverUrl: game.coverUrl,
         platformSlug,
       };
+      if (useMagnet) body.magnet = magnet;
+      else body.minervaPath = selected!.fullPath;
       if (platformId != null) body.platformId = platformId;
 
       const res = await fetch("/api/downloads", {
@@ -155,7 +163,10 @@ export function DownloadPanel({ game, rommPlatforms, suggestedSlug }: Props) {
   };
 
   const canSubmit =
-    !!selected && !!selectedPlatform && status !== "submitting" && status !== "queued";
+    (magnetValid || !!selected) &&
+    !!selectedPlatform &&
+    status !== "submitting" &&
+    status !== "queued";
 
   return (
     <div className="steam-panel space-y-3.5 p-5">
@@ -222,6 +233,31 @@ export function DownloadPanel({ game, rommPlatforms, suggestedSlug }: Props) {
           ))}
         </div>
       )}
+
+      {/* Manual magnet — for games Minerva doesn't have. Takes precedence. */}
+      <div className="border-t border-white/5 pt-3">
+        <label className="block text-xs font-medium uppercase tracking-wide text-steam-muted">
+          Or paste a magnet link
+        </label>
+        <input
+          value={manualMagnet}
+          onChange={(e) => {
+            setManualMagnet(e.target.value);
+            if (e.target.value.trim()) setSelected(null);
+          }}
+          placeholder="magnet:?xt=urn:btih:…"
+          className="steam-input mt-1.5 w-full font-mono text-xs"
+        />
+        {magnet.length > 0 && !magnetValid && (
+          <p className="mt-1 text-xs text-amber-300">That doesn&apos;t look like a magnet link.</p>
+        )}
+        {magnetValid && (
+          <p className="mt-1 text-xs text-steam-muted">
+            Using this magnet — the main file is uploaded as{" "}
+            <span className="text-steam-text">{game.name}</span>.
+          </p>
+        )}
+      </div>
 
       <div className="flex flex-wrap items-end gap-3 border-t border-white/5 pt-4">
         {/* Platform combobox */}

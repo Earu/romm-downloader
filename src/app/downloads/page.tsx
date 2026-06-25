@@ -43,6 +43,7 @@ const STATE_LABEL: Record<string, string> = {
   resolving: "Resolving magnet",
   fetching: "Downloading",
   unavailable: "Needs choice",
+  multi_file: "Multiple files",
   local_fetching: "Downloading (torrent)",
   uploading: "Installing",
   done: "Done",
@@ -281,7 +282,7 @@ function QueueRow({ job, onChange }: { job: Job; onChange: () => void }) {
       ? "text-steam-green-light"
       : job.state === "failed"
         ? "text-red-400"
-        : job.state === "unavailable"
+        : job.state === "unavailable" || job.state === "multi_file"
           ? "text-amber-400"
           : "text-steam-blue-light";
 
@@ -370,7 +371,7 @@ function FallbackModal({ job, onChange }: { job: Job; onChange: () => void }) {
       <div className="w-full max-w-lg border border-black/50 bg-steam-deep shadow-[0_12px_50px_rgba(0,0,0,0.7)]">
         <div className="border-b border-steam-line px-6 py-4">
           <h2 className="text-lg font-bold text-steam-bright">
-            {providerLabel(job.debridProvider)} can&apos;t fetch this game
+            {providerLabel(job.debridProvider)} can't fetch this game
           </h2>
           <p className="mt-0.5 truncate text-sm text-steam-muted">{job.title}</p>
         </div>
@@ -407,6 +408,89 @@ function FallbackModal({ job, onChange }: { job: Job; onChange: () => void }) {
               Discard
             </button>
           </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Shown when a download has several files (base game + updates + DLC) but the app
+ * doesn't share RomM's library on disk — so RomM can't be given a folder to group
+ * them. The user picks one file to add, or configures ROMM_LIBRARY_PATH.
+ */
+function MultiFileModal({ job, onChange }: { job: Job; onChange: () => void }) {
+  const [files, setFiles] = useState<{ id: string; name: string; size: number }[] | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    fetch(`/api/downloads/${job.id}/files`, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((d) => live && setFiles(d.files ?? []))
+      .catch(() => live && setFiles([]));
+    return () => {
+      live = false;
+    };
+  }, [job.id]);
+
+  const pick = async (fileId: string) => {
+    setBusy(true);
+    await api(job.id, "POST", { action: "pick", fileId });
+    onChange();
+  };
+  const discard = async () => {
+    await api(job.id, "DELETE");
+    onChange();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6 backdrop-blur-sm">
+      <div className="w-full max-w-lg border border-black/50 bg-steam-deep shadow-[0_12px_50px_rgba(0,0,0,0.7)]">
+        <div className="border-b border-steam-line px-6 py-4">
+          <h2 className="text-lg font-bold text-steam-bright">This download has multiple files</h2>
+          <p className="mt-0.5 truncate text-sm text-steam-muted">{job.title}</p>
+        </div>
+
+        <div className="space-y-4 px-6 py-5">
+          <p className="text-sm text-steam-text">
+            It contains several files (e.g. base game + updates + DLC). RomM can&apos;t be given
+            them as one game over the network. Pick a single file to add, or set{" "}
+            <span className="font-mono text-steam-bright">ROMM_LIBRARY_PATH</span> so the app can
+            group them into one library entry.
+          </p>
+
+          <div className="max-h-64 overflow-y-auto border border-black/50 bg-black/20">
+            {files === null ? (
+              <p className="flex items-center gap-2 px-3 py-3 text-xs text-steam-blue-light">
+                <Spinner className="h-3.5 w-3.5" /> Loading files…
+              </p>
+            ) : files.length === 0 ? (
+              <p className="px-3 py-3 text-xs text-steam-muted">No files found.</p>
+            ) : (
+              files.map((f) => (
+                <button
+                  key={f.id}
+                  disabled={busy}
+                  onClick={() => pick(f.id)}
+                  className="flex w-full items-center gap-2 border-b border-steam-line px-3 py-2 text-left text-xs text-steam-muted transition last:border-b-0 hover:bg-steam-blue/20 hover:text-steam-text disabled:opacity-50"
+                  title={f.name}
+                >
+                  <span className="truncate">{f.name}</span>
+                  <span className="ml-auto shrink-0 text-[10px] text-steam-muted/70">
+                    {fmtSize(f.size)}
+                  </span>
+                </button>
+              ))
+            )}
+          </div>
+
+          <button
+            onClick={discard}
+            className="w-full px-4 py-2 text-sm font-medium text-steam-muted transition hover:text-steam-text"
+          >
+            Discard
+          </button>
         </div>
       </div>
     </div>
@@ -465,6 +549,7 @@ export default function DownloadsPage() {
   const history = jobs.filter((j) => j.state === "done" || j.state === "failed");
   // First job awaiting the user's fallback choice drives the modal.
   const unavailable = jobs.find((j) => j.state === "unavailable");
+  const multiFile = jobs.find((j) => j.state === "multi_file");
 
   // Derive live download speed / peak / ETA from successive byte readings.
   useEffect(() => {
@@ -510,6 +595,7 @@ export default function DownloadsPage() {
   return (
     <div>
       {unavailable && <FallbackModal job={unavailable} onChange={load} />}
+      {!unavailable && multiFile && <MultiFileModal job={multiFile} onChange={load} />}
       {featured ? (
         <FeaturedDownload job={featured} stats={stats} onChange={load} />
       ) : (

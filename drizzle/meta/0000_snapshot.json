@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "a156a053-6d47-4164-965e-2a6451142b31",
+  "id": "a019026f-c6e2-4d40-b31e-c8054adbafd7",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "download_jobs": {
@@ -70,16 +70,30 @@
           "notNull": false,
           "autoincrement": false
         },
-        "torbox_id": {
-          "name": "torbox_id",
+        "minerva_so_id": {
+          "name": "minerva_so_id",
           "type": "integer",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
-        "torbox_file_id": {
-          "name": "torbox_file_id",
-          "type": "integer",
+        "debrid_provider": {
+          "name": "debrid_provider",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "debrid_id": {
+          "name": "debrid_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "debrid_file_id": {
+          "name": "debrid_file_id",
+          "type": "text",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
@@ -176,9 +190,23 @@
           "notNull": false,
           "autoincrement": false
         },
-        "torbox_api_key": {
-          "name": "torbox_api_key",
+        "debrid_provider": {
+          "name": "debrid_provider",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "debrid_api_key": {
+          "name": "debrid_api_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "max_debrid_gb": {
+          "name": "max_debrid_gb",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false

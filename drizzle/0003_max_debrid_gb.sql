@@ -1,1 +1,0 @@
-ALTER TABLE `settings` ADD `max_debrid_gb` integer;
