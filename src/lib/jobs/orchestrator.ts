@@ -12,13 +12,19 @@ import { streamUrlToFile } from "./download";
 import { failJob, updateJob } from "./queue";
 import { downloadSelectedFile } from "./torrent";
 
+// Above this size we don't auto-download from TorBox; instead the job parks in
+// "unavailable" so the user can choose the built-in torrent client (which can
+// fetch just the requested file) or grab the magnet.
+const MAX_TORBOX_GB = 30;
+const MAX_TORBOX_BYTES = MAX_TORBOX_GB * 1024 ** 3;
+
 /** Advance a single job by one step. Long steps (fetch/upload) run to completion. */
 export async function advanceJob(job: DownloadJob): Promise<void> {
   const cfg = await getConfig();
   try {
     switch (job.state) {
       case "requested":
-        return await handleResolve(job);
+        return await handleResolve(job, !!cfg.torboxApiKey);
       case "adding":
         return await handleAdd(job, new TorboxClient(requireKey(cfg.torboxApiKey)));
       case "caching":
@@ -60,7 +66,7 @@ function requireKey(key: string): string {
   return key;
 }
 
-async function handleResolve(job: DownloadJob): Promise<void> {
+async function handleResolve(job: DownloadJob, hasTorboxKey: boolean): Promise<void> {
   if (!job.minervaPath) {
     await failJob(job.id, "No Minerva ROM path on job");
     return;
@@ -73,7 +79,9 @@ async function handleResolve(job: DownloadJob): Promise<void> {
     return;
   }
   await updateJob(job.id, {
-    state: "adding",
+    // With no TorBox key, go straight to the built-in torrent client (aria2);
+    // otherwise add to TorBox first.
+    state: hasTorboxKey ? "adding" : "local_fetching",
     releaseName: resolved.fileName,
     magnetOrHash: acquire,
     bytesTotal: resolved.size ?? null,
@@ -142,6 +150,19 @@ async function handleCaching(job: DownloadJob, torbox: TorboxClient): Promise<vo
     return;
   }
 
+  // Don't pull very large files through TorBox (e.g. a whole-set mega-archive or
+  // a big disc image) — hand off to the user instead.
+  if (file.size != null && file.size > MAX_TORBOX_BYTES) {
+    const gb = (file.size / 1024 ** 3).toFixed(1);
+    await updateJob(job.id, {
+      state: "unavailable",
+      error:
+        `This download is ${gb} GB, over the ${MAX_TORBOX_GB} GB TorBox limit. ` +
+        `Use the built-in torrent client or copy the magnet to download it yourself.`,
+    });
+    return;
+  }
+
   await updateJob(job.id, {
     state: "fetching",
     torboxFileId: file.id,
@@ -159,16 +180,31 @@ async function handleCaching(job: DownloadJob, torbox: TorboxClient): Promise<vo
  * upload. Used when the user opts into the local torrent for an "unavailable" job.
  */
 async function handleLocalFetching(job: DownloadJob, tmpDir: string): Promise<void> {
-  if (!job.magnetOrHash || !job.releaseName) {
-    await failJob(job.id, "Missing magnet for local torrent download");
+  if (!job.minervaPath || !job.releaseName) {
+    await failJob(job.id, "Missing ROM path for local torrent download");
     return;
   }
   const jobDir = join(tmpDir, job.id);
   await mkdir(jobDir, { recursive: true });
 
+  // Prefer the actual .torrent file — it carries Minerva's full, working tracker
+  // list (our hardcoded magnet trackers are mostly dead, so the magnet finds no
+  // peers). Fall back to the magnet only if there's no .torrent.
+  const resolved = await resolveMagnet(job.minervaPath);
+  let source: string | Buffer | undefined;
+  if (resolved.torrentUrl) {
+    const res = await fetch(resolved.torrentUrl, { cache: "no-store" });
+    if (res.ok) source = Buffer.from(await res.arrayBuffer());
+  }
+  if (!source) source = resolved.magnet ?? job.magnetOrHash ?? undefined;
+  if (!source) {
+    await failJob(job.id, "No torrent or magnet available for local download");
+    return;
+  }
+
   let lastWrite = 0;
   const result = await downloadSelectedFile(
-    job.magnetOrHash,
+    source,
     job.minervaSoId,
     job.releaseName,
     jobDir,

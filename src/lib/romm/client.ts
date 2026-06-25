@@ -15,6 +15,21 @@ export interface RommPlatform {
   url_logo?: string | null;
 }
 
+/** Subset of RomM's ROM schema we use. */
+export interface RommRom {
+  id: number;
+  name?: string;
+  fs_name?: string;
+  fs_name_no_tags?: string;
+  fs_name_no_ext?: string;
+  fs_size_bytes?: number;
+  platform_slug?: string;
+  platform_display_name?: string;
+  summary?: string | null;
+  url_cover?: string | null;
+  igdb_id?: number | null;
+}
+
 export interface RommHeartbeat {
   SYSTEM: { VERSION: string; SHOW_SETUP_WIZARD: boolean };
   METADATA_SOURCES: Record<string, boolean>;
@@ -99,6 +114,28 @@ export class RommClient {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ fs_slug: fsSlug }),
+    });
+  }
+
+  /** List all ROMs in the library (the installed games). */
+  async listRoms(): Promise<RommRom[]> {
+    const res = await this.req<{ items?: RommRom[] } | RommRom[]>(
+      "/roms?limit=10000&order_by=name",
+    );
+    return Array.isArray(res) ? res : (res.items ?? []);
+  }
+
+  /** Fetch a single ROM by id. */
+  async getRom(id: number): Promise<RommRom> {
+    return this.req<RommRom>(`/roms/${id}`);
+  }
+
+  /** Uninstall a ROM: remove it from the RomM database AND the filesystem. */
+  async deleteRom(id: number): Promise<void> {
+    await this.req("/roms/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ roms: [id], delete_from_fs: [id] }),
     });
   }
 

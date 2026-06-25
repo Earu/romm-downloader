@@ -129,6 +129,25 @@ export function IconX(props: IconProps) {
   );
 }
 
+/** Checkmark. */
+export function IconCheck(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="m5 12.5 4.5 4.5L19 6.5" />
+    </Svg>
+  );
+}
+
+/** Trash can — uninstall/remove. */
+export function IconTrash(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M4 7h16" />
+      <path d="M10 4h4M6 7l1 13h10l1-13M10 11v6M14 11v6" />
+    </Svg>
+  );
+}
+
 /** Circular arrow — retry. */
 export function IconRetry(props: IconProps) {
   return (

@@ -21,6 +21,10 @@ ENV NODE_ENV=production \
     DATABASE_URL=file:/app/data/app.db \
     DOWNLOAD_TMP_DIR=/app/data/downloads
 
+# aria2 powers the built-in torrent fallback (selective single-file download
+# from Minerva's bundle torrents, which TorBox can't serve).
+RUN apk add --no-cache aria2
+
 # Standalone server + static assets + migrations.
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
