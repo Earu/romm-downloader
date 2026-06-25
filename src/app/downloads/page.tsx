@@ -277,6 +277,10 @@ function FeaturedDownload({
 
 function QueueRow({ job, onChange }: { job: Job; onChange: () => void }) {
   const terminal = job.state === "done" || job.state === "failed";
+  // Anything not actively transferring can be removed — including a job wedged in
+  // "Queued" — so a stuck queue is always clearable. (Active states would orphan
+  // an in-flight download, so they keep no remove button.)
+  const removable = !ACTIVE_STATES.has(job.state);
   const stateColor =
     job.state === "done"
       ? "text-steam-green-light"
@@ -321,7 +325,7 @@ function QueueRow({ job, onChange }: { job: Job; onChange: () => void }) {
             <IconRetry className="h-5 w-5" />
           </button>
         )}
-        {terminal && (
+        {removable && (
           <button
             onClick={async () => {
               await api(job.id, "DELETE");
