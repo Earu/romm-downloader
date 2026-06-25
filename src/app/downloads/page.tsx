@@ -18,6 +18,7 @@ interface Job {
   targetPlatformSlug: string;
   releaseName: string | null;
   magnetOrHash: string | null;
+  debridProvider: string | null;
   state: string;
   progress: number;
   bytesDownloaded: number | null;
@@ -26,11 +27,20 @@ interface Job {
   error: string | null;
 }
 
+const PROVIDER_LABELS: Record<string, string> = {
+  torbox: "TorBox",
+  realdebrid: "Real-Debrid",
+  alldebrid: "AllDebrid",
+  premiumize: "Premiumize",
+};
+
+function providerLabel(id: string | null | undefined): string {
+  return (id && PROVIDER_LABELS[id]) || "debrid";
+}
+
 const STATE_LABEL: Record<string, string> = {
   requested: "Queued",
   resolving: "Resolving magnet",
-  adding: "Adding to TorBox",
-  caching: "TorBox caching",
   fetching: "Downloading",
   unavailable: "Needs choice",
   local_fetching: "Downloading (torrent)",
@@ -38,6 +48,14 @@ const STATE_LABEL: Record<string, string> = {
   done: "Done",
   failed: "Failed",
 };
+
+/** State label, using the job's debrid provider name where relevant. */
+function stateLabel(job: Job): string {
+  const p = providerLabel(job.debridProvider);
+  if (job.state === "adding") return `Adding to ${p}`;
+  if (job.state === "caching") return `${p} caching`;
+  return STATE_LABEL[job.state] ?? job.state;
+}
 
 const ACTIVE_STATES = new Set([
   "resolving",
@@ -187,7 +205,7 @@ function FeaturedDownload({
           </div>
           <div className="min-w-0 pb-1">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-steam-blue-light">
-              {STATE_LABEL[job.state] ?? job.state}
+              {stateLabel(job)}
             </p>
             <h2 className="truncate text-3xl font-bold text-steam-bright">{job.title}</h2>
             <p className="mt-0.5 truncate text-xs text-steam-muted">
@@ -351,14 +369,16 @@ function FallbackModal({ job, onChange }: { job: Job; onChange: () => void }) {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6 backdrop-blur-sm">
       <div className="w-full max-w-lg border border-black/50 bg-steam-deep shadow-[0_12px_50px_rgba(0,0,0,0.7)]">
         <div className="border-b border-steam-line px-6 py-4">
-          <h2 className="text-lg font-bold text-steam-bright">TorBox can&apos;t fetch this game</h2>
+          <h2 className="text-lg font-bold text-steam-bright">
+            {providerLabel(job.debridProvider)} can&apos;t fetch this game
+          </h2>
           <p className="mt-0.5 truncate text-sm text-steam-muted">{job.title}</p>
         </div>
 
         <div className="space-y-4 px-6 py-5">
           <p className="text-sm text-steam-text">
             {job.error ||
-              "TorBox doesn't have this file cached for the bundle torrent."}{" "}
+              `${providerLabel(job.debridProvider)} doesn't have this file for the bundle torrent.`}{" "}
             You can fetch just this file with the built-in torrent client, or grab the magnet
             and download it yourself.
           </p>

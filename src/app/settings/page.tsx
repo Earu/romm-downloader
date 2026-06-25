@@ -11,17 +11,27 @@ interface ServiceHealth {
 }
 interface Health {
   romm: ServiceHealth;
-  torbox: ServiceHealth;
+  debrid: ServiceHealth;
   igdb: ServiceHealth;
 }
 interface SettingsView {
   rommUrl: string;
-  rommTokenMasked: string;
-  torboxApiKeyMasked: string;
+  rommToken: string;
+  debridProvider: string;
+  debridApiKey: string;
+  maxDebridGb: number;
   igdbClientId: string;
-  igdbClientSecretMasked: string;
+  igdbClientSecret: string;
   downloadTmpDir: string;
 }
+
+const DEBRID_OPTIONS = [
+  { id: "none", label: "None (built-in torrent)" },
+  { id: "torbox", label: "TorBox" },
+  { id: "realdebrid", label: "Real-Debrid" },
+  { id: "alldebrid", label: "AllDebrid" },
+  { id: "premiumize", label: "Premiumize" },
+];
 interface MinervaStatus {
   syncing: boolean;
   phase?: "index" | "db";
@@ -93,7 +103,6 @@ function StatusBadge({ s }: { s: ServiceHealth }) {
 export default function SettingsPage() {
   const [section, setSection] = useState<SectionId>("services");
   const [health, setHealth] = useState<Health | null>(null);
-  const [view, setView] = useState<SettingsView | null>(null);
   const [form, setForm] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -112,10 +121,12 @@ export default function SettingsPage() {
   const loadSettings = useCallback(async () => {
     const res = await fetch("/api/settings", { cache: "no-store" });
     const data: SettingsView = await res.json();
-    setView(data);
     setForm({
-      rommUrl: data.rommUrl,
+      debridProvider: data.debridProvider || "none",
+      debridApiKey: data.debridApiKey,
+      maxDebridGb: String(data.maxDebridGb ?? 30),
       igdbClientId: data.igdbClientId,
+      igdbClientSecret: data.igdbClientSecret,
       downloadTmpDir: data.downloadTmpDir,
     });
   }, []);
@@ -208,10 +219,10 @@ export default function SettingsPage() {
             </div>
             <GroupTitle>Connectivity</GroupTitle>
             <div className="space-y-1">
-              {(["romm", "torbox", "igdb"] as const).map((k) => (
+              {(["romm", "debrid", "igdb"] as const).map((k) => (
                 <Row
                   key={k}
-                  label={k === "igdb" ? "IGDB" : k === "romm" ? "RomM" : "TorBox"}
+                  label={k === "igdb" ? "IGDB" : k === "romm" ? "RomM" : "Debrid"}
                   desc={health?.[k]?.detail || undefined}
                 >
                   {health ? (
@@ -233,26 +244,43 @@ export default function SettingsPage() {
               current value (shown masked).
             </p>
 
-            <GroupTitle>RomM</GroupTitle>
+            <GroupTitle>Debrid provider</GroupTitle>
             <div className="space-y-1">
-              <Row label="Server URL">{input("rommUrl", "http://localhost:8080")}</Row>
-              <Row label="Client API Token">
-                {input("rommToken", view?.rommTokenMasked || "rmm_…", "password")}
+              <Row label="Provider" desc="Which debrid service to use, if any.">
+                <select
+                  value={form.debridProvider ?? "none"}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, debridProvider: e.target.value }))
+                  }
+                  className="steam-input w-72"
+                >
+                  {DEBRID_OPTIONS.map((o) => (
+                    <option key={o.id} value={o.id} className="bg-steam-slate">
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
               </Row>
-            </div>
-
-            <GroupTitle>TorBox</GroupTitle>
-            <div className="space-y-1">
-              <Row label="API Key">
-                {input("torboxApiKey", view?.torboxApiKeyMasked || "", "password")}
-              </Row>
+              {(form.debridProvider ?? "none") !== "none" && (
+                <>
+                  <Row label="API Key">
+                    {input("debridApiKey", "", "password")}
+                  </Row>
+                  <Row
+                    label="Max size (GB)"
+                    desc="Files larger than this skip the debrid provider and offer the built-in torrent client."
+                  >
+                    {input("maxDebridGb", "30", "number")}
+                  </Row>
+                </>
+              )}
             </div>
 
             <GroupTitle>IGDB (catalog metadata)</GroupTitle>
             <div className="space-y-1">
               <Row label="Client ID">{input("igdbClientId", "")}</Row>
               <Row label="Client Secret">
-                {input("igdbClientSecret", view?.igdbClientSecretMasked || "", "password")}
+                {input("igdbClientSecret", "", "password")}
               </Row>
             </div>
 

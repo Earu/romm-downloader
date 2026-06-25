@@ -15,6 +15,20 @@
       "when": 1782326395154,
       "tag": "0001_peaceful_wendell_rand",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1782347380312,
+      "tag": "0002_magenta_young_avengers",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1782347400000,
+      "tag": "0003_max_debrid_gb",
+      "breakpoints": true
     }
   ]
 }

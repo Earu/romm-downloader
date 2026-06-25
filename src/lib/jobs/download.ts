@@ -5,8 +5,8 @@ import { dirname } from "node:path";
 
 /**
  * Stream a remote URL to a local file, reporting progress. Used to pull the
- * file from TorBox's short-lived CDN link down to the app's tmp dir before
- * uploading into RomM.
+ * file from the debrid provider's short-lived CDN link down to the app's tmp dir
+ * before uploading into RomM.
  */
 export async function streamUrlToFile(
   url: string,
