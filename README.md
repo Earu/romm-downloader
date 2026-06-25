@@ -101,6 +101,7 @@ Set these as environment variables (see `.env.example`) or in the in-app
 | `DATABASE_URL` | libSQL/SQLite URL (default `file:./data/app.db`) |
 | `DOWNLOAD_TMP_DIR` | Where files are staged before upload (default `./data/downloads`) |
 | `MINERVA_DIR` | Where the Minerva index + `hashes.db` are cached (default `./data/minerva`) |
+| `ROMM_LIBRARY_PATH` | RomM's ROMs directory, shared with this app on disk (e.g. `<romm-library>/roms`). When set, files are written straight to disk and multi-file releases are grouped into one library entry. See [Hosting](#hosting). |
 
 No `ROMM_TOKEN` is needed — logging in provisions one automatically. The
 **aria2** binary is required for the built-in torrent client.
@@ -128,17 +129,49 @@ against (web UI on `http://localhost:8080`). See that file's header for bring-up
 commands. After it's up, create a user — then log into RomM Downloader with that
 RomM URL + username + password.
 
-## Deployment (standalone container)
+## Hosting
+
+```bash
+docker pull ghcr.io/earu/romm-downloader:latest
+
+docker run -d --name romm-downloader \
+  -p 3000:3000 \
+  -e ROMM_URL=http://your-romm:8080 \
+  -e AUTH_SECRET="$(openssl rand -hex 32)" \
+  -e IGDB_CLIENT_ID=... -e IGDB_CLIENT_SECRET=... \
+  -e DEBRID_PROVIDER=torbox -e DEBRID_API_KEY=... \
+  -v romm_downloader_data:/app/data \
+  ghcr.io/earu/romm-downloader:latest
+```
+
+Or with Compose:
+
+```yaml
+services:
+  romm-downloader:
+    image: ghcr.io/earu/romm-downloader:latest
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - ROMM_URL=http://your-romm:8080
+      - AUTH_SECRET=change-me           # openssl rand -hex 32
+      - IGDB_CLIENT_ID=...
+      - IGDB_CLIENT_SECRET=...
+      - DEBRID_PROVIDER=torbox
+      - DEBRID_API_KEY=...
+    volumes:
+      - romm_downloader_data:/app/data
+volumes:
+  romm_downloader_data:
+```
+
+### Build from source
 
 ```bash
 cp .env.example .env             # set AUTH_SECRET (+ IGDB / debrid as desired)
 docker compose -f docker-compose.example.yml up -d --build
 ```
-
-The image is `node:22-alpine` and installs **aria2** for the torrent fallback. The
-container talks to RomM and the debrid service over HTTP only; no volume sharing
-with RomM is needed. The `/app/data` volume persists the job database, settings,
-the Minerva cache, and in-flight downloads.
 
 ## Project layout
 
