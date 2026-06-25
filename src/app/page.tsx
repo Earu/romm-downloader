@@ -25,12 +25,12 @@ interface CatalogResponse {
   error?: string;
 }
 
-type Tab = "global" | "installed";
+type Tab = "all" | "installed";
 
 const GRID = "grid grid-cols-3 gap-4 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-10";
 
 export default function CatalogPage() {
-  const [tab, setTab] = useState<Tab>("global");
+  const [tab, setTab] = useState<Tab>("all");
   const [term, setTerm] = useState("");
   const [data, setData] = useState<CatalogResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -66,7 +66,7 @@ export default function CatalogPage() {
 
   // Catalog: initial popular load + debounced search (Global tab only).
   useEffect(() => {
-    if (tab !== "global") return;
+    if (tab !== "all") return;
     if (debounce.current) clearTimeout(debounce.current);
     debounce.current = setTimeout(() => void loadCatalog(term), term ? 350 : 0);
     return () => {
@@ -92,7 +92,7 @@ export default function CatalogPage() {
       {/* Tabs + search */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-1">
-          {(["global", "installed"] as const).map((t) => (
+          {(["all", "installed"] as const).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
@@ -115,13 +115,13 @@ export default function CatalogPage() {
           <input
             value={term}
             onChange={(e) => setTerm(e.target.value)}
-            placeholder={tab === "global" ? "Search games…" : "Filter installed…"}
+            placeholder={tab === "all" ? "Search games…" : "Filter installed…"}
             className="steam-input w-96 pl-9"
           />
         </div>
       </div>
 
-      {tab === "global" ? (
+      {tab === "all" ? (
         <>
           {data && !data.enabled && (
             <div className="border-l-2 border-amber-500 bg-amber-500/10 p-4 text-sm text-amber-200">

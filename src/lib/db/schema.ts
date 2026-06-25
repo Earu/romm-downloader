@@ -8,10 +8,10 @@ import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 export const JOB_STATES = [
   "requested", // created, not yet picked up
   "resolving", // looking up the chosen ROM's magnet in the Minerva index
-  "adding", // POST createtorrent (TorBox)
-  "caching", // TorBox downloading/caching to its cloud
-  "fetching", // streaming the file from TorBox to local tmp
-  "unavailable", // TorBox can't serve this file — awaiting user's fallback choice
+  "adding", // add magnet to the debrid provider
+  "caching", // debrid provider downloading/caching to its cloud
+  "fetching", // streaming the file from the debrid provider to local tmp
+  "unavailable", // debrid provider can't serve this file — awaiting user's fallback choice
   "local_fetching", // downloading the file via the built-in torrent client (&so)
   "uploading", // chunked upload into RomM + scan
   "done",
@@ -31,10 +31,14 @@ export const downloadJobs = sqliteTable("download_jobs", {
   // RomM target
   targetPlatformId: integer("target_platform_id").notNull(),
   targetPlatformSlug: text("target_platform_slug").notNull(),
-  // TorBox acquisition
+  // Debrid acquisition
   releaseName: text("release_name"),
   magnetOrHash: text("magnet_or_hash"),
   minervaSoId: integer("minerva_so_id"), // BitTorrent file index from Minerva hashes.db
+  debridProvider: text("debrid_provider"), // which debrid service handled this job
+  debridId: text("debrid_id"), // provider transfer id
+  debridFileId: text("debrid_file_id"), // chosen file id within the transfer
+  // Legacy TorBox columns (superseded by debrid_* above).
   torboxId: integer("torbox_id"),
   torboxFileId: integer("torbox_file_id"),
   // Progress / status
@@ -63,7 +67,9 @@ export const settings = sqliteTable("settings", {
   id: integer("id").primaryKey().default(1),
   rommUrl: text("romm_url"),
   rommToken: text("romm_token"),
-  torboxApiKey: text("torbox_api_key"),
+  debridProvider: text("debrid_provider"),
+  debridApiKey: text("debrid_api_key"),
+  maxDebridGb: integer("max_debrid_gb"),
   igdbClientId: text("igdb_client_id"),
   igdbClientSecret: text("igdb_client_secret"),
   downloadTmpDir: text("download_tmp_dir"),

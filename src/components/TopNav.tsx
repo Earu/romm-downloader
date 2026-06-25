@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 import { Logo } from "@/components/icons";
 
 const TABS = [
@@ -16,11 +17,32 @@ function isActive(pathname: string, href: string): boolean {
 
 export function TopNav() {
   const pathname = usePathname() ?? "/";
+  const router = useRouter();
+  const [username, setUsername] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    fetch("/api/auth/session", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => active && setUsername(d?.username ?? null))
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [pathname]);
+
+  const logout = async () => {
+    await fetch("/api/auth/logout", { method: "POST" });
+    router.replace("/login");
+    router.refresh();
+  };
+
+  // No chrome on the login screen.
+  if (pathname === "/login") return null;
 
   return (
     <header className="sticky top-0 z-40 h-14 border-b border-white/5 bg-steam-navy/85 backdrop-blur-xl">
       <nav className="grid h-full grid-cols-[1fr_auto_1fr] items-center px-8">
-        {/* Brand */}
         <Link href="/" className="flex items-center gap-2.5 justify-self-start">
           <Logo className="h-6 w-6 text-steam-bright" />
           <span className="text-[15px] font-bold tracking-tight text-steam-bright">
@@ -28,7 +50,6 @@ export function TopNav() {
           </span>
         </Link>
 
-        {/* Centered pill tabs */}
         <div className="flex items-center gap-1 justify-self-center">
           {TABS.map((t) => {
             const active = isActive(pathname, t.href);
@@ -50,8 +71,19 @@ export function TopNav() {
           })}
         </div>
 
-        {/* Right status spacer (keeps tabs optically centred) */}
-        <div className="justify-self-end" />
+        <div className="flex items-center gap-3 justify-self-end">
+          {username && (
+            <span className="text-sm text-steam-muted">
+              {username}
+            </span>
+          )}
+          <button
+            onClick={logout}
+            className="text-sm font-medium text-steam-muted transition hover:text-steam-text"
+          >
+            Log out
+          </button>
+        </div>
       </nav>
     </header>
   );

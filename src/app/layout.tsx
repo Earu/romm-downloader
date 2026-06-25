@@ -11,7 +11,7 @@ const manrope = Manrope({
 
 export const metadata: Metadata = {
   title: "RomM Downloader",
-  description: "Browse a game catalog, acquire via TorBox, and push into RomM.",
+  description: "Browse a game catalog, fetch via a debrid service or torrent, and push into RomM.",
 };
 
 export default function RootLayout({

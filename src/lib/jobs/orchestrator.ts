@@ -3,20 +3,14 @@ import { createWriteStream } from "node:fs";
 import { copyFile, mkdir, rename, rm } from "node:fs/promises";
 import { basename, join } from "node:path";
 import unzipper from "unzipper";
-import { getConfig } from "@/lib/config";
+import { type AppConfig, getConfig } from "@/lib/config";
+import { type AcquireHint, type DebridProvider, getDebridProvider } from "@/lib/debrid";
 import type { DownloadJob } from "@/lib/db/schema";
 import { resolveMagnet } from "@/lib/minerva/client";
 import { RommClient } from "@/lib/romm/client";
-import { TorboxClient } from "@/lib/torbox/client";
 import { streamUrlToFile } from "./download";
 import { failJob, updateJob } from "./queue";
 import { downloadSelectedFile } from "./torrent";
-
-// Above this size we don't auto-download from TorBox; instead the job parks in
-// "unavailable" so the user can choose the built-in torrent client (which can
-// fetch just the requested file) or grab the magnet.
-const MAX_TORBOX_GB = 30;
-const MAX_TORBOX_BYTES = MAX_TORBOX_GB * 1024 ** 3;
 
 /** Advance a single job by one step. Long steps (fetch/upload) run to completion. */
 export async function advanceJob(job: DownloadJob): Promise<void> {
@@ -24,17 +18,13 @@ export async function advanceJob(job: DownloadJob): Promise<void> {
   try {
     switch (job.state) {
       case "requested":
-        return await handleResolve(job, !!cfg.torboxApiKey);
+        return await handleResolve(job, !!getDebridProvider(cfg));
       case "adding":
-        return await handleAdd(job, new TorboxClient(requireKey(cfg.torboxApiKey)));
+        return await handleAdd(job, requireProvider(cfg));
       case "caching":
-        return await handleCaching(job, new TorboxClient(requireKey(cfg.torboxApiKey)));
+        return await handleCaching(job, requireProvider(cfg), cfg.maxDebridGb);
       case "fetching":
-        return await handleFetching(
-          job,
-          new TorboxClient(requireKey(cfg.torboxApiKey)),
-          cfg.downloadTmpDir,
-        );
+        return await handleFetching(job, requireProvider(cfg), cfg.downloadTmpDir);
       case "local_fetching":
         return await handleLocalFetching(job, cfg.downloadTmpDir);
       case "uploading":
@@ -61,12 +51,17 @@ export async function cleanupJobFiles(jobId: string): Promise<void> {
   await rm(join(cfg.downloadTmpDir, jobId), { recursive: true, force: true }).catch(() => {});
 }
 
-function requireKey(key: string): string {
-  if (!key) throw new Error("TorBox API key not configured");
-  return key;
+function requireProvider(cfg: AppConfig): DebridProvider {
+  const provider = getDebridProvider(cfg);
+  if (!provider) throw new Error("No debrid provider configured");
+  return provider;
 }
 
-async function handleResolve(job: DownloadJob, hasTorboxKey: boolean): Promise<void> {
+function hintOf(job: DownloadJob): AcquireHint {
+  return { releaseName: job.releaseName, soId: job.minervaSoId };
+}
+
+async function handleResolve(job: DownloadJob, hasDebrid: boolean): Promise<void> {
   if (!job.minervaPath) {
     await failJob(job.id, "No Minerva ROM path on job");
     return;
@@ -79,9 +74,9 @@ async function handleResolve(job: DownloadJob, hasTorboxKey: boolean): Promise<v
     return;
   }
   await updateJob(job.id, {
-    // With no TorBox key, go straight to the built-in torrent client (aria2);
-    // otherwise add to TorBox first.
-    state: hasTorboxKey ? "adding" : "local_fetching",
+    // With no debrid provider configured, go straight to the built-in torrent
+    // client (aria2); otherwise add to the debrid service first.
+    state: hasDebrid ? "adding" : "local_fetching",
     releaseName: resolved.fileName,
     magnetOrHash: acquire,
     bytesTotal: resolved.size ?? null,
@@ -90,38 +85,45 @@ async function handleResolve(job: DownloadJob, hasTorboxKey: boolean): Promise<v
   });
 }
 
-async function handleAdd(job: DownloadJob, torbox: TorboxClient): Promise<void> {
+async function handleAdd(job: DownloadJob, provider: DebridProvider): Promise<void> {
   if (!job.magnetOrHash) {
     await failJob(job.id, "No magnet/hash on job");
     return;
   }
-  const { torrent_id } = await torbox.createTorrent(job.magnetOrHash);
-  await updateJob(job.id, { state: "caching", torboxId: torrent_id, progress: 0 });
+  const id = await provider.addMagnet(job.magnetOrHash, hintOf(job));
+  await updateJob(job.id, {
+    state: "caching",
+    debridProvider: provider.id,
+    debridId: id,
+    progress: 0,
+  });
 }
 
-async function handleCaching(job: DownloadJob, torbox: TorboxClient): Promise<void> {
-  if (job.torboxId == null) {
-    await failJob(job.id, "No TorBox id on job");
+async function handleCaching(
+  job: DownloadJob,
+  provider: DebridProvider,
+  maxDebridGb: number,
+): Promise<void> {
+  if (!job.debridId) {
+    await failJob(job.id, "No debrid transfer id on job");
     return;
   }
-  const torrent = await torbox.getTorrent(job.torboxId);
-  if (!torrent) return; // not visible yet; try again next tick
+  const status = await provider.getStatus(job.debridId, hintOf(job));
+  if (!status) return; // not visible yet; try again next tick
 
-  const ready = torrent.download_finished || torrent.download_present;
-  if (!ready) {
-    await updateJob(job.id, { progress: Math.round((torrent.progress ?? 0) * 100) });
+  if (!status.ready) {
+    await updateJob(job.id, { progress: Math.round((status.progress ?? 0) * 100) });
     return;
   }
 
   // Minerva packs an entire platform set into ONE torrent and the file we want
-  // is identified by name. TorBox only exposes the files it has cached for a
-  // torrent (and ignores the magnet's `&so` selection), so the file may or may
-  // not be available. Pick deliberately:
+  // is identified by name. A debrid service exposes whatever files it has for
+  // the transfer, so the file may or may not be available. Pick deliberately:
   //   1. exact file present  -> the right individual ROM (use directly)
   //   2. whole-set archive    -> a single Minerva_Myrient.zip to extract from
-  //   3. neither              -> TorBox doesn't have our ROM: fail, never upload
-  //      some other game that merely happens to be cached.
-  const files = (torrent.files ?? []).filter((f) => !basename(f.name).startsWith("."));
+  //   3. neither              -> the provider doesn't have our ROM: hand off to
+  //      the user, never upload some other game that happens to be present.
+  const files = status.files.filter((f) => !basename(f.name).startsWith("."));
   const wanted = job.releaseName ? basename(job.releaseName).toLowerCase() : null;
 
   let file = wanted
@@ -136,28 +138,28 @@ async function handleCaching(job: DownloadJob, torbox: TorboxClient): Promise<vo
   }
 
   if (!file) {
-    // TorBox can't serve this file (it only caches a subset of the bundle and
-    // ignores `&so`). Hand off to the user: the built-in torrent client CAN
-    // fetch just this file via select-only. Park the job in "unavailable".
+    // The provider can't serve this file. Park the job in "unavailable" so the
+    // user can fetch just this file via the built-in torrent client.
     const available = files.map((f) => basename(f.name)).slice(0, 4).join(", ");
     await updateJob(job.id, {
       state: "unavailable",
       error:
-        `TorBox doesn't have "${job.releaseName}" cached for this bundle torrent` +
+        `${provider.label} doesn't have "${job.releaseName}" for this bundle torrent` +
         (available ? ` (it only has: ${available})` : "") +
         `.`,
     });
     return;
   }
 
-  // Don't pull very large files through TorBox (e.g. a whole-set mega-archive or
-  // a big disc image) — hand off to the user instead.
-  if (file.size != null && file.size > MAX_TORBOX_BYTES) {
+  // Don't pull very large files through the debrid provider (e.g. a whole-set
+  // mega-archive or a big disc image) — hand off to the user instead.
+  const maxBytes = maxDebridGb * 1024 ** 3;
+  if (file.size != null && file.size > maxBytes) {
     const gb = (file.size / 1024 ** 3).toFixed(1);
     await updateJob(job.id, {
       state: "unavailable",
       error:
-        `This download is ${gb} GB, over the ${MAX_TORBOX_GB} GB TorBox limit. ` +
+        `This download is ${gb} GB, over the ${maxDebridGb} GB ${provider.label} limit. ` +
         `Use the built-in torrent client or copy the magnet to download it yourself.`,
     });
     return;
@@ -165,7 +167,7 @@ async function handleCaching(job: DownloadJob, torbox: TorboxClient): Promise<vo
 
   await updateJob(job.id, {
     state: "fetching",
-    torboxFileId: file.id,
+    debridFileId: file.id,
     bytesTotal: file.size,
     // The downloaded filename; when it's a whole-set archive it differs from
     // releaseName and handleUploading extracts the requested ROM from it.
@@ -238,14 +240,22 @@ async function handleLocalFetching(job: DownloadJob, tmpDir: string): Promise<vo
 
 async function handleFetching(
   job: DownloadJob,
-  torbox: TorboxClient,
+  provider: DebridProvider,
   tmpDir: string,
 ): Promise<void> {
-  if (job.torboxId == null || job.torboxFileId == null || !job.uploadedFilename) {
-    await failJob(job.id, "Missing TorBox file info");
+  if (!job.debridId || !job.debridFileId || !job.uploadedFilename) {
+    await failJob(job.id, "Missing debrid file info");
     return;
   }
-  const url = await torbox.requestDownloadLink(job.torboxId, job.torboxFileId);
+  // Re-read the transfer so we have the file (and its per-file link, for
+  // providers that need one) before requesting the direct URL.
+  const status = await provider.getStatus(job.debridId, hintOf(job));
+  const file = status?.files.find((f) => f.id === job.debridFileId);
+  if (!file) {
+    await failJob(job.id, "Debrid file is no longer available");
+    return;
+  }
+  const url = await provider.getDownloadLink(job.debridId, file);
   const dest = join(tmpDir, job.id, job.uploadedFilename);
 
   // Persist progress on a ~1s cadence (not per-5%) so the Downloads page can

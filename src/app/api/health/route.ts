@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getConfig } from "@/lib/config";
+import { getDebridProvider } from "@/lib/debrid";
 import { RommClient } from "@/lib/romm/client";
-import { TorboxClient } from "@/lib/torbox/client";
 
 export const dynamic = "force-dynamic";
 
@@ -11,7 +11,7 @@ interface ServiceHealth {
   detail?: string;
 }
 
-/** Connectivity + auth check for RomM, TorBox, and the IGDB catalog. */
+/** Connectivity + auth check for RomM, the debrid provider, and the IGDB catalog. */
 export async function GET() {
   const cfg = await getConfig();
 
@@ -32,15 +32,18 @@ export async function GET() {
     }
   }
 
-  const torbox: ServiceHealth = { configured: Boolean(cfg.torboxApiKey), ok: false };
-  if (cfg.torboxApiKey) {
+  const provider = getDebridProvider(cfg);
+  const debrid: ServiceHealth = { configured: Boolean(provider), ok: false };
+  if (provider) {
     try {
-      await new TorboxClient(cfg.torboxApiKey).ping();
-      torbox.ok = true;
-      torbox.detail = "API key valid";
+      await provider.ping();
+      debrid.ok = true;
+      debrid.detail = `${provider.label} key valid`;
     } catch (e) {
-      torbox.detail = e instanceof Error ? e.message : String(e);
+      debrid.detail = `${provider.label}: ${e instanceof Error ? e.message : String(e)}`;
     }
+  } else {
+    debrid.detail = "none — downloads use the built-in torrent client";
   }
 
   const igdb: ServiceHealth = {
@@ -52,5 +55,5 @@ export async function GET() {
         : "set IGDB_CLIENT_ID/SECRET to enable catalog",
   };
 
-  return NextResponse.json({ romm, torbox, igdb });
+  return NextResponse.json({ romm, debrid, igdb });
 }

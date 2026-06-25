@@ -10,17 +10,26 @@ import { settings } from "@/lib/db/schema";
 export interface AppConfig {
   rommUrl: string;
   rommToken: string;
-  torboxApiKey: string;
+  /** Selected debrid service ("torbox" | "realdebrid" | ... | "none"). */
+  debridProvider: string;
+  /** API key for the selected debrid provider. */
+  debridApiKey: string;
+  /** Above this size (GB), skip the debrid provider and offer the torrent fallback. */
+  maxDebridGb: number;
   igdbClientId: string;
   igdbClientSecret: string;
   downloadTmpDir: string;
 }
 
+const DEFAULT_MAX_DEBRID_GB = 30;
+
 function fromEnv(): AppConfig {
   return {
     rommUrl: process.env.ROMM_URL ?? "http://localhost:8080",
     rommToken: process.env.ROMM_TOKEN ?? "",
-    torboxApiKey: process.env.TORBOX_API_KEY ?? "",
+    debridProvider: process.env.DEBRID_PROVIDER ?? "none",
+    debridApiKey: process.env.DEBRID_API_KEY ?? "",
+    maxDebridGb: Number(process.env.MAX_DEBRID_GB) || DEFAULT_MAX_DEBRID_GB,
     igdbClientId: process.env.IGDB_CLIENT_ID ?? "",
     igdbClientSecret: process.env.IGDB_CLIENT_SECRET ?? "",
     downloadTmpDir: process.env.DOWNLOAD_TMP_DIR ?? "./data/downloads",
@@ -35,7 +44,9 @@ export async function getConfig(): Promise<AppConfig> {
     return {
       rommUrl: row.rommUrl || env.rommUrl,
       rommToken: row.rommToken || env.rommToken,
-      torboxApiKey: row.torboxApiKey || env.torboxApiKey,
+      debridProvider: row.debridProvider || env.debridProvider,
+      debridApiKey: row.debridApiKey || env.debridApiKey,
+      maxDebridGb: row.maxDebridGb ?? env.maxDebridGb,
       igdbClientId: row.igdbClientId || env.igdbClientId,
       igdbClientSecret: row.igdbClientSecret || env.igdbClientSecret,
       downloadTmpDir: row.downloadTmpDir || env.downloadTmpDir,
