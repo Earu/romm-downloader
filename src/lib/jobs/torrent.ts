@@ -36,9 +36,30 @@ const PROGRESS_RE =
   /([\d.]+)(B|KiB|MiB|GiB|TiB)\/([\d.]+)(B|KiB|MiB|GiB|TiB)\((\d+)%\)/;
 // aria2 prints this when a file finishes: "Download complete: /path/to/file"
 const COMPLETE_RE = /Download complete:\s*(.+?)\s*$/;
+// Peer/seeder counts in the progress summary, e.g. "CN:30 SD:2".
+const PEERS_RE = /CN:(\d+)\s+SD:(\d+)/;
 
 function toBytes(num: string, unit: string): number {
   return Math.round(parseFloat(num) * (UNIT[unit] ?? 1));
+}
+
+/** Turn a non-zero aria2 exit into a message that explains what actually went wrong. */
+function describeAriaFailure(code: number | null, downloaded: number, maxConns: number): string {
+  // Exit 7 = aria2 stopped with the download unfinished (here: --bt-stop-timeout
+  // fired). If nothing ever connected or downloaded, the swarm is dead.
+  if (downloaded === 0 && maxConns === 0) return "Dead torrent — no seeders or peers found.";
+  if (code === 7) {
+    return downloaded === 0
+      ? "Stopped — no data from peers."
+      : `Stopped at ${(downloaded / 1024 ** 3).toFixed(1)} GB — peers dropped.`;
+  }
+  const hint =
+    code === 2 ? "timed out" :
+    code === 3 || code === 4 ? "file not found" :
+    code === 5 ? "too slow" :
+    code === 6 ? "network error" :
+    "error";
+  return `aria2: ${hint} (exit ${code})`;
 }
 
 /** Recursively find a file by basename under `dir`. */
@@ -134,7 +155,8 @@ export function downloadSelectedFile(
       ];
 
       const proc = spawn(ARIA2C, args, { stdio: ["ignore", "pipe", "pipe"] });
-      let stderrTail = "";
+      let lastDownloaded = 0;
+      let maxConns = 0;
 
       proc.on("error", (e: NodeJS.ErrnoException) => {
         void finish(
@@ -149,7 +171,12 @@ export function downloadSelectedFile(
 
       const handleLine = (line: string) => {
         const p = PROGRESS_RE.exec(line);
-        if (p) onProgress(toBytes(p[1], p[2]), toBytes(p[3], p[4]));
+        if (p) {
+          lastDownloaded = toBytes(p[1], p[2]);
+          onProgress(lastDownloaded, toBytes(p[3], p[4]));
+        }
+        const peers = PEERS_RE.exec(line);
+        if (peers) maxConns = Math.max(maxConns, Number(peers[1]));
         const c = COMPLETE_RE.exec(line);
         if (c && !c[1].endsWith(".source.torrent")) completePath = c[1].trim();
       };
@@ -163,15 +190,12 @@ export function downloadSelectedFile(
         for (const line of parts) handleLine(line);
       };
       proc.stdout?.on("data", onData);
-      proc.stderr?.on("data", (d: Buffer) => {
-        stderrTail = (stderrTail + d.toString()).slice(-500);
-        onData(d);
-      });
+      proc.stderr?.on("data", onData);
 
       proc.on("close", async (code) => {
         if (settled) return;
         if (code !== 0) {
-          await finish(new Error(`aria2c exited ${code}: ${stderrTail.trim().slice(-300)}`));
+          await finish(new Error(describeAriaFailure(code, lastDownloaded, maxConns)));
           return;
         }
         // Locate the finished file: aria2's reported path, else by release name,
