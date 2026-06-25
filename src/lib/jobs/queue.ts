@@ -87,12 +87,13 @@ export async function listJobs(): Promise<DownloadJob[]> {
   return db.select().from(downloadJobs).orderBy(desc(downloadJobs.createdAt)).all();
 }
 
-/** Jobs that the worker should still act on (non-terminal). */
+/** Non-terminal jobs the worker should still act on, oldest first (FIFO queue). */
 export async function listActiveJobs(): Promise<DownloadJob[]> {
   return db
     .select()
     .from(downloadJobs)
     .where(notInArray(downloadJobs.state, TERMINAL))
+    .orderBy(downloadJobs.createdAt)
     .all();
 }
 
