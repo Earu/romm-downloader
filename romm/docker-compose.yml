@@ -20,8 +20,11 @@ services:
       # Optional: enable metadata (IGDB) — also powers our catalog via RomM proxy.
       - IGDB_CLIENT_ID=${IGDB_CLIENT_ID:-}
       - IGDB_CLIENT_SECRET=${IGDB_CLIENT_SECRET:-}
+    # Uncommon host ports (override in romm/.env) to avoid clashing with other
+    # services. Bind to 0.0.0.0 so they're reachable on the LAN (see README /
+    # WSL networking notes). Container ports stay 8080/3000.
     ports:
-      - "8080:8080"
+      - "${ROMM_HTTP_PORT:-8730}:8080"
     volumes:
       - romm_resources:/romm/resources
       - romm_redis_data:/redis-data
@@ -60,7 +63,7 @@ services:
       # move into place is an atomic rename, not a multi-GB copy.
       - DOWNLOAD_TMP_DIR=/romm/library/.romm-downloader-tmp
     ports:
-      - "3000:3000"
+      - "${APP_HTTP_PORT:-8731}:3000"
     volumes:
       - romm_downloader_data:/app/data
       - romm_library:/romm/library

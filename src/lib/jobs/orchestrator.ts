@@ -121,6 +121,25 @@ function gameFilesOf(files: DebridFile[]): DebridFile[] {
   return (candidates.length > 0 ? candidates : files).slice().sort((a, b) => b.size - a.size);
 }
 
+// Disc-based systems whose standalone emulators (PPSSPP, PCSX2, Dolphin, etc.)
+// can't boot a zipped disc image — they need the raw .iso/.cso/.bin/etc. Myrient
+// packs the image in a .zip, so for these we extract it before handing to RomM.
+// (Cartridge systems run on libretro cores that read .zip fine, so leave those.)
+const DISC_PLATFORMS = new Set([
+  "psp", "ps2", "ps3", "ps", "psvita",
+  "gc", "wii", "wiiu", "3ds",
+  "xbox", "xbox360",
+  "saturn", "dreamcast", "sega-cd", "turbografx-cd", "neo-geo-cd", "pc-fx", "3do", "cdi",
+]);
+
+/** Names of the real content entries in a zip (skipping scans/nfo/etc.). */
+async function listZipContentEntries(zipPath: string): Promise<string[]> {
+  const dir = await unzipper.Open.file(zipPath);
+  return dir.files
+    .filter((f: unzipper.File) => f.type === "File" && !IGNORE_EXT.has(extOf(basename(f.path))))
+    .map((f: unzipper.File) => f.path);
+}
+
 async function handleResolve(job: DownloadJob, hasDebrid: boolean): Promise<void> {
   // With no debrid provider configured, go straight to the built-in torrent
   // client (aria2); otherwise add to the debrid service first.
@@ -432,6 +451,22 @@ async function handleUploading(
     }
     // If extraction fails (shouldn't happen, but be defensive), fall through and
     // upload the archive so the job doesn't silently fail.
+  }
+
+  // Disc-based system packed as a .zip (Myrient's layout): standalone emulators
+  // can't boot a zipped image, so extract the real disc file (.iso/.cso/.bin…)
+  // and hand RomM that instead. Single-image discs are the common case (PSP, PS2,
+  // GameCube, Wii, Xbox); a multi-file disc (e.g. PS1 .bin+.cue) is left zipped
+  // for now since it needs its own folder.
+  if (DISC_PLATFORMS.has(job.targetPlatformSlug) && uploadFilename.toLowerCase().endsWith(".zip")) {
+    const entries = await listZipContentEntries(uploadPath).catch(() => [] as string[]);
+    if (entries.length === 1) {
+      const extracted = await extractRomFromZip(uploadPath, basename(entries[0]), join(jobDir, "extracted"));
+      if (extracted) {
+        uploadPath = extracted;
+        uploadFilename = basename(extracted);
+      }
+    }
   }
 
   // When this app shares RomM's library on disk, write the file straight into a
