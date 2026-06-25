@@ -215,4 +215,3 @@ romm/                  # dev-only local RomM docker stack
 - **Minerva** reads its static assets directly (gzipped index for search +
   `hashes.db` SQLite for magnets) via `src/lib/minerva/`. If Minerva changes its
   asset layout, update the URLs/queries there.
-```
