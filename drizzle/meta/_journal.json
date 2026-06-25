@@ -8,6 +8,13 @@
       "when": 1782377114004,
       "tag": "0000_chunky_loners",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1782425385065,
+      "tag": "0001_lame_thunderbolts",
+      "breakpoints": true
     }
   ]
 }

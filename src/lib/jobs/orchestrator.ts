@@ -13,6 +13,7 @@ import {
 import type { DownloadJob } from "@/lib/db/schema";
 import { resolveMagnet } from "@/lib/minerva/client";
 import { RommClient } from "@/lib/romm/client";
+import { resolveVimm, vimmHeaders, vimmSupportsPlatform } from "@/lib/vimm/resolver";
 import { streamUrlToFile } from "./download";
 import { countJobsByDebridId, createDebridFetchJob, failJob, updateJob } from "./queue";
 import { downloadSelectedFile } from "./torrent";
@@ -32,6 +33,8 @@ export async function advanceJob(job: DownloadJob): Promise<void> {
         return await handleFetching(job, requireProvider(cfg), cfg.downloadTmpDir);
       case "local_fetching":
         return await handleLocalFetching(job, cfg.downloadTmpDir);
+      case "http_fetching":
+        return await handleHttpFetching(job, cfg.downloadTmpDir);
       case "uploading":
         return await handleUploading(
           job,
@@ -88,6 +91,41 @@ export async function pickJobFile(job: DownloadJob, fileId: string): Promise<boo
     debridFileId: file.id,
     bytesTotal: file.size,
     uploadedFilename: basename(file.name),
+    progress: 0,
+    error: null,
+  });
+  return true;
+}
+
+/**
+ * Fallback: resolve the job's game on Vimm's Lair (a reliable per-game HTTP
+ * source) and switch it to a direct HTTP download. Used when the torrent is dead
+ * or the debrid provider can't serve it. Returns false (parking the job in
+ * "unavailable") when the platform isn't on Vimm or nothing matches.
+ */
+export async function startVimmFallback(job: DownloadJob): Promise<boolean> {
+  if (!vimmSupportsPlatform(job.targetPlatformSlug)) {
+    await updateJob(job.id, {
+      state: "unavailable",
+      error: `Vimm's Lair doesn't cover ${job.targetPlatformSlug}.`,
+    });
+    return false;
+  }
+  const resolved = await resolveVimm(job.releaseName || job.title, job.targetPlatformSlug);
+  if (!resolved) {
+    await updateJob(job.id, {
+      state: "unavailable",
+      error: `No match found on Vimm's Lair for "${job.title}".`,
+    });
+    return false;
+  }
+  await updateJob(job.id, {
+    state: "http_fetching",
+    sourceUrl: resolved.url,
+    uploadedFilename: resolved.fileName,
+    releaseName: resolved.fileName, // keep equal so it's not treated as a collection archive
+    bytesTotal: null,
+    bytesDownloaded: null,
     progress: 0,
     error: null,
   });
@@ -352,20 +390,31 @@ async function handleLocalFetching(job: DownloadJob, tmpDir: string): Promise<vo
   }
 
   let lastWrite = 0;
-  const result = await downloadSelectedFile(
-    source,
-    job.minervaSoId,
-    job.releaseName,
-    jobDir,
-    (downloaded, total) => {
-      const now = Date.now();
-      if (now - lastWrite >= 1000) {
-        lastWrite = now;
-        const pct = total ? Math.round((downloaded / total) * 100) : 0;
-        void updateJob(job.id, { progress: pct, bytesDownloaded: downloaded, bytesTotal: total });
-      }
-    },
-  );
+  let result;
+  try {
+    result = await downloadSelectedFile(
+      source,
+      job.minervaSoId,
+      job.releaseName,
+      jobDir,
+      (downloaded, total) => {
+        const now = Date.now();
+        if (now - lastWrite >= 1000) {
+          lastWrite = now;
+          const pct = total ? Math.round((downloaded / total) * 100) : 0;
+          void updateJob(job.id, { progress: pct, bytesDownloaded: downloaded, bytesTotal: total });
+        }
+      },
+    );
+  } catch (e) {
+    // A dead torrent isn't a dead end — park the job so the user can fall back to
+    // Vimm's Lair (a reliable direct download) or grab the magnet to do it manually.
+    await updateJob(job.id, {
+      state: "unavailable",
+      error: e instanceof Error ? e.message : String(e),
+    });
+    return;
+  }
 
   // The client writes into nested torrent folders; flatten to jobDir/<name> so
   // handleUploading finds it.
@@ -416,6 +465,40 @@ async function handleFetching(
       void updateJob(job.id, { progress: pct, bytesDownloaded: downloaded });
     }
   });
+  await updateJob(job.id, { state: "uploading", bytesDownloaded: bytes, progress: 0 });
+}
+
+/**
+ * Download a file directly over HTTP from `job.sourceUrl` (e.g. a Vimm's Lair
+ * fallback) into the tmp dir, then hand off to upload. Reuses the generic
+ * streamer; Vimm needs a browser UA + Referer.
+ */
+async function handleHttpFetching(job: DownloadJob, tmpDir: string): Promise<void> {
+  if (!job.sourceUrl || !job.uploadedFilename) {
+    await failJob(job.id, "Missing source URL for HTTP download");
+    return;
+  }
+  const dest = join(tmpDir, job.id, job.uploadedFilename);
+  const headers = job.sourceUrl.includes("vimm.net") ? vimmHeaders() : undefined;
+
+  let lastWrite = 0;
+  const bytes = await streamUrlToFile(
+    job.sourceUrl,
+    dest,
+    (downloaded, total) => {
+      const now = Date.now();
+      if (now - lastWrite >= 1000) {
+        lastWrite = now;
+        const pct = total ? Math.round((downloaded / total) * 100) : 0;
+        void updateJob(job.id, {
+          progress: pct,
+          bytesDownloaded: downloaded,
+          bytesTotal: total || null,
+        });
+      }
+    },
+    headers,
+  );
   await updateJob(job.id, { state: "uploading", bytesDownloaded: bytes, progress: 0 });
 }
 
@@ -576,8 +659,7 @@ async function isLibraryWritable(root: string): Promise<boolean> {
 
 /** Filesystem-safe folder name from a game title (RomM matches it to metadata). */
 function sanitizeFolderName(title: string): string {
-  // eslint-disable-next-line no-control-regex
-  return title.replace(/[<>:"/\\|?* -]+/g, " ").replace(/\s+/g, " ").trim();
+  return title.replace(/[<>:"/\\|?*]+/g, " ").replace(/\s+/g, " ").trim();
 }
 
 /**

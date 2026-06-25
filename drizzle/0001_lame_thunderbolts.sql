@@ -1,0 +1,1 @@
+ALTER TABLE `download_jobs` ADD `source_url` text;

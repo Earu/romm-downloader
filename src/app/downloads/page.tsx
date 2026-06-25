@@ -45,6 +45,7 @@ const STATE_LABEL: Record<string, string> = {
   unavailable: "Needs choice",
   multi_file: "Multiple files",
   local_fetching: "Downloading (torrent)",
+  http_fetching: "Downloading (Vimm)",
   uploading: "Installing",
   done: "Done",
   failed: "Failed",
@@ -64,6 +65,7 @@ const ACTIVE_STATES = new Set([
   "caching",
   "fetching",
   "local_fetching",
+  "http_fetching",
   "uploading",
 ]);
 
@@ -106,7 +108,8 @@ function phases(job: Job): { dl: number; inst: number } {
   let dl = 0;
   let inst = 0;
   if (s === "uploading" || s === "done") dl = 100;
-  else if (s === "caching" || s === "fetching" || s === "local_fetching") dl = job.progress;
+  else if (s === "caching" || s === "fetching" || s === "local_fetching" || s === "http_fetching")
+    dl = job.progress;
   if (s === "done") inst = 100;
   else if (s === "uploading") inst = job.progress;
   return { dl, inst };
@@ -315,6 +318,19 @@ function QueueRow({ job, onChange }: { job: Job; onChange: () => void }) {
         {job.state === "failed" && (
           <button
             onClick={async () => {
+              await api(job.id, "POST", { action: "vimm" });
+              onChange();
+            }}
+            title="Try Vimm's Lair"
+            aria-label="Try Vimm's Lair"
+            className="flex h-10 w-10 items-center justify-center text-steam-muted transition hover:bg-white/10 hover:text-steam-bright"
+          >
+            <IconDownload className="h-5 w-5" />
+          </button>
+        )}
+        {job.state === "failed" && (
+          <button
+            onClick={async () => {
               await api(job.id, "POST");
               onChange();
             }}
@@ -350,7 +366,17 @@ function QueueRow({ job, onChange }: { job: Job; onChange: () => void }) {
  */
 function FallbackModal({ job, onChange }: { job: Job; onChange: () => void }) {
   const [copied, setCopied] = useState(false);
+  const [vimmMsg, setVimmMsg] = useState("");
+  const [vimmBusy, setVimmBusy] = useState(false);
 
+  const useVimm = async () => {
+    setVimmBusy(true);
+    setVimmMsg("");
+    const res = await api(job.id, "POST", { action: "vimm" });
+    setVimmBusy(false);
+    if (res.ok) onChange();
+    else setVimmMsg("No match found on Vimm's Lair for this game/platform.");
+  };
   const useLocal = async () => {
     await api(job.id, "POST", { action: "local" });
     onChange();
@@ -370,12 +396,18 @@ function FallbackModal({ job, onChange }: { job: Job; onChange: () => void }) {
     onChange();
   };
 
+  // A dead/failed torrent (vs. a debrid provider that just couldn't serve a
+  // bundle) — the built-in torrent already failed, so don't offer it again.
+  const deadTorrent = /dead torrent|seeders|peers|aria2|stopped/i.test(job.error || "");
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6 backdrop-blur-sm">
       <div className="w-full max-w-lg border border-black/50 bg-steam-deep shadow-[0_12px_50px_rgba(0,0,0,0.7)]">
         <div className="border-b border-steam-line px-6 py-4">
           <h2 className="text-lg font-bold text-steam-bright">
-            {providerLabel(job.debridProvider)} can't fetch this game
+            {deadTorrent
+              ? "This torrent is dead"
+              : `${providerLabel(job.debridProvider)} can't fetch this game`}
           </h2>
           <p className="mt-0.5 truncate text-sm text-steam-muted">{job.title}</p>
         </div>
@@ -384,8 +416,9 @@ function FallbackModal({ job, onChange }: { job: Job; onChange: () => void }) {
           <p className="text-sm text-steam-text">
             {job.error ||
               `${providerLabel(job.debridProvider)} doesn't have this file for the bundle torrent.`}{" "}
-            You can fetch just this file with the built-in torrent client, or grab the magnet
-            and download it yourself.
+            {deadTorrent
+              ? "Try a reliable direct download from Vimm's Lair, or grab the magnet to download it yourself."
+              : "You can fetch just this file with the built-in torrent client, or grab the magnet and download it yourself."}
           </p>
 
           {job.magnetOrHash && (
@@ -398,10 +431,21 @@ function FallbackModal({ job, onChange }: { job: Job; onChange: () => void }) {
           )}
 
           <div className="flex flex-col gap-2">
-            <button onClick={useLocal} className="steam-btn-green w-full justify-center">
+            <button
+              onClick={useVimm}
+              disabled={vimmBusy}
+              className="steam-btn-green w-full justify-center disabled:opacity-50"
+            >
               <IconDownload className="h-4 w-4" />
-              Download with built-in torrent
+              {vimmBusy ? "Searching Vimm's Lair…" : "Try Vimm's Lair (direct download)"}
             </button>
+            {vimmMsg && <p className="text-xs text-amber-300">{vimmMsg}</p>}
+            {!deadTorrent && (
+              <button onClick={useLocal} className="steam-btn w-full justify-center">
+                <IconDownload className="h-4 w-4" />
+                Download with built-in torrent
+              </button>
+            )}
             <button onClick={copyMagnet} className="steam-btn w-full justify-center">
               {copied ? "Copied ✓" : "Copy magnet & remove"}
             </button>
