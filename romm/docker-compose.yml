@@ -32,6 +32,41 @@ services:
       romm-db:
         condition: service_healthy
 
+  # The romm-downloader app itself. Built from the repo root and run here so it
+  # can SHARE RomM's library volume — that lets multi-file releases be written
+  # into a per-game folder and grouped into one RomM entry (ROMM_LIBRARY_PATH),
+  # which RomM's HTTP upload API can't do.
+  romm-downloader:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: romm-downloader:latest
+    container_name: romm-downloader
+    restart: unless-stopped
+    environment:
+      # Reach RomM over the compose network (not localhost). This is the URL
+      # pre-filled on the login screen; keep it as-is when logging in.
+      - ROMM_URL=http://romm:8080
+      - AUTH_SECRET=${AUTH_SECRET}
+      - DEBRID_PROVIDER=${DEBRID_PROVIDER:-none}
+      - DEBRID_API_KEY=${DEBRID_API_KEY:-}
+      - MAX_DEBRID_GB=${MAX_DEBRID_GB:-30}
+      - IGDB_CLIENT_ID=${IGDB_CLIENT_ID:-}
+      - IGDB_CLIENT_SECRET=${IGDB_CLIENT_SECRET:-}
+      # Shared RomM library → write files straight to disk and group multi-file
+      # releases into one folder instead of uploading over HTTP.
+      - ROMM_LIBRARY_PATH=/romm/library/roms
+      # Keep in-flight downloads on the SAME volume as the library so the final
+      # move into place is an atomic rename, not a multi-GB copy.
+      - DOWNLOAD_TMP_DIR=/romm/library/.romm-downloader-tmp
+    ports:
+      - "3000:3000"
+    volumes:
+      - romm_downloader_data:/app/data
+      - romm_library:/romm/library
+    depends_on:
+      - romm
+
   romm-db:
     image: mariadb:latest
     container_name: romm-db
@@ -56,3 +91,4 @@ volumes:
   romm_assets:
   romm_config:
   romm_db_data:
+  romm_downloader_data:
