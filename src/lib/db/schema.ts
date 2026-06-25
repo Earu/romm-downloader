@@ -14,6 +14,7 @@ export const JOB_STATES = [
   "unavailable", // debrid provider can't serve this file — awaiting user's fallback choice
   "multi_file", // torrent has several files but no shared library to group them — awaiting user's choice
   "local_fetching", // downloading the file via the built-in torrent client (&so)
+  "http_fetching", // downloading the file directly over HTTP from a source URL (e.g. Vimm's Lair)
   "uploading", // chunked upload into RomM + scan
   "done",
   "failed",
@@ -39,6 +40,8 @@ export const downloadJobs = sqliteTable("download_jobs", {
   debridProvider: text("debrid_provider"), // which debrid service handled this job
   debridId: text("debrid_id"), // provider transfer id
   debridFileId: text("debrid_file_id"), // chosen file id within the transfer
+  // Direct HTTP source (e.g. Vimm's Lair fallback) — streamed locally as-is.
+  sourceUrl: text("source_url"),
   // Progress / status
   state: text("state").$type<JobState>().notNull().default("requested"),
   progress: integer("progress").notNull().default(0), // 0..100

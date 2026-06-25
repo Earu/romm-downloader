@@ -17,7 +17,7 @@ const MINERVA_CHECK_MS = 12 * 60 * 60 * 1000;
 // waiting for the user (unavailable / multi_file) — skip those so they don't
 // block the queue.
 const WORKABLE = new Set<string>([
-  "requested", "adding", "caching", "fetching", "local_fetching", "uploading",
+  "requested", "adding", "caching", "fetching", "local_fetching", "http_fetching", "uploading",
 ]);
 
 // Guard against duplicate intervals across HMR reloads in dev. `current` is the id

@@ -12,9 +12,10 @@ export async function streamUrlToFile(
   url: string,
   destPath: string,
   onProgress?: (downloaded: number, total: number) => void,
+  headers?: Record<string, string>,
 ): Promise<number> {
   await mkdir(dirname(destPath), { recursive: true });
-  const res = await fetch(url, { cache: "no-store" });
+  const res = await fetch(url, { cache: "no-store", headers });
   if (!res.ok || !res.body) {
     throw new Error(`download failed: HTTP ${res.status}`);
   }

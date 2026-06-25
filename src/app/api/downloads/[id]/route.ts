@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { cleanupJobFiles, pickJobFile } from "@/lib/jobs/orchestrator";
+import { cleanupJobFiles, pickJobFile, startVimmFallback } from "@/lib/jobs/orchestrator";
 import { deleteJob, getJob, retryJob, updateJob } from "@/lib/jobs/queue";
 
 export const dynamic = "force-dynamic";
@@ -16,6 +16,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
  * - retry: reset a failed job to the start.
  * - local: an "unavailable" job opts into the built-in torrent client.
  * - pick: a "multi_file" job commits to a single file (`fileId`) and proceeds.
+ * - vimm: resolve the game on Vimm's Lair and download it directly over HTTP.
  */
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -37,6 +38,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     if (!fileId) return NextResponse.json({ error: "fileId required" }, { status: 400 });
     const ok = await pickJobFile(job, fileId);
     if (!ok) return NextResponse.json({ error: "File no longer available" }, { status: 409 });
+  } else if (action === "vimm") {
+    const ok = await startVimmFallback(job);
+    if (!ok) return NextResponse.json({ error: "No match on Vimm's Lair" }, { status: 409 });
   } else {
     await retryJob(id);
   }
