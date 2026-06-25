@@ -45,6 +45,19 @@ export class RommError extends Error {
   }
 }
 
+// Statuses a reverse proxy returns when the upstream is too slow (gateway
+// timeouts), plus 408 (request timeout). On the upload-finalize step these mean
+// "RomM is still assembling the file", not "it failed".
+const GATEWAY_TIMEOUT_STATUSES = new Set([408, 502, 503, 504, 524]);
+
+/** True if `e` indicates the finalize request timed out (proxy or client-side). */
+function isFinalizeTimeout(e: unknown): boolean {
+  if (e instanceof RommError) return e.status != null && GATEWAY_TIMEOUT_STATUSES.has(e.status);
+  // undici surfaces its own timeouts as a TypeError with a coded cause.
+  const code = (e as { cause?: { code?: string } } | undefined)?.cause?.code;
+  return code === "UND_ERR_HEADERS_TIMEOUT" || code === "UND_ERR_BODY_TIMEOUT";
+}
+
 // RomM caps chunks at 64MB; use a comfortable 16MB to balance request count.
 const UPLOAD_CHUNK_SIZE = 16 * 1024 * 1024;
 
@@ -125,6 +138,53 @@ export class RommClient {
     return Array.isArray(res) ? res : (res.items ?? []);
   }
 
+  /**
+   * Find a ROM by its on-disk filename. Used to confirm an upload registered
+   * after a finalize that timed out at the proxy. Matches the platform too so a
+   * same-named file on another platform doesn't cause a false positive.
+   */
+  async findRomByFsName(fsName: string, platformId: number): Promise<RommRom | undefined> {
+    const res = await this.req<{ items?: RommRom[] } | RommRom[]>(
+      `/roms?platform_id=${platformId}&limit=10000`,
+    );
+    const roms = Array.isArray(res) ? res : (res.items ?? []);
+    return roms.find((r) => r.fs_name === fsName);
+  }
+
+  /**
+   * Remove any leftover ".assembling" temp files RomM scanned as ROMs for the
+   * given upload. A scan that ran while RomM was still assembling a large file
+   * can register the hidden "<name>.<uuid>.assembling" temp as a ghost ROM;
+   * this deletes those (and their dead temp files) for `fsName` only.
+   */
+  async deleteAssemblingGhosts(fsName: string, platformId: number): Promise<number> {
+    const res = await this.req<{ items?: RommRom[] } | RommRom[]>(
+      `/roms?platform_id=${platformId}&limit=10000`,
+    );
+    const roms = Array.isArray(res) ? res : (res.items ?? []);
+    const ghosts = roms.filter(
+      (r) => r.fs_name?.endsWith(".assembling") && r.fs_name.includes(fsName),
+    );
+    for (const g of ghosts) {
+      // Try to remove the dead temp file too. If RomM can't find it on disk
+      // (usually it's already been renamed on finalize) it reports a failure and
+      // keeps the DB row, so fall back to a DB-only delete to drop the ghost.
+      const r = await this.req<{ failed_items?: number }>("/roms/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ roms: [g.id], delete_from_fs: [g.id] }),
+      }).catch(() => ({ failed_items: 1 }));
+      if (r?.failed_items) {
+        await this.req("/roms/delete", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ roms: [g.id], delete_from_fs: [] }),
+        }).catch(() => {});
+      }
+    }
+    return ghosts.length;
+  }
+
   /** Fetch a single ROM by id. */
   async getRom(id: number): Promise<RommRom> {
     return this.req<RommRom>(`/roms/${id}`);
@@ -149,7 +209,7 @@ export class RommClient {
     platformId: number,
     filename: string,
     onProgress?: (sentBytes: number, totalBytes: number) => void,
-  ): Promise<void> {
+  ): Promise<{ finalized: boolean }> {
     const { size } = await stat(filePath);
     const totalChunks = Math.max(1, Math.ceil(size / UPLOAD_CHUNK_SIZE));
 
@@ -183,7 +243,18 @@ export class RommClient {
       onProgress?.(sent, size);
     }
 
-    await this.req(`/roms/upload/${upload_id}/complete`, { method: "POST" });
+    // Finalize. For large files RomM assembles all chunks here, which can take
+    // longer than its reverse proxy's read timeout — yielding a 502/503/504 (or
+    // a client-side fetch timeout) while the server is *still* working. Treat
+    // that as "not yet finalized" rather than a hard failure so the caller can
+    // verify the ROM actually landed.
+    try {
+      await this.req(`/roms/upload/${upload_id}/complete`, { method: "POST" });
+      return { finalized: true };
+    } catch (e) {
+      if (isFinalizeTimeout(e)) return { finalized: false };
+      throw e;
+    }
   }
 
   /**

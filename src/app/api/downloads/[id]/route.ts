@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { cleanupJobFiles } from "@/lib/jobs/orchestrator";
+import { cleanupJobFiles, pickJobFile } from "@/lib/jobs/orchestrator";
 import { deleteJob, getJob, retryJob, updateJob } from "@/lib/jobs/queue";
 
 export const dynamic = "force-dynamic";
@@ -12,19 +12,18 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 }
 
 /**
- * Job actions. Body `{ action: "retry" | "local" }` (defaults to retry):
+ * Job actions. Body `{ action, fileId? }` (action defaults to retry):
  * - retry: reset a failed job to the start.
  * - local: an "unavailable" job opts into the built-in torrent client.
+ * - pick: a "multi_file" job commits to a single file (`fileId`) and proceeds.
  */
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const job = await getJob(id);
   if (!job) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  const action = await req
-    .json()
-    .then((b) => (b?.action as string | undefined) ?? "retry")
-    .catch(() => "retry");
+  const body = await req.json().catch(() => ({}) as Record<string, unknown>);
+  const action = (body?.action as string | undefined) ?? "retry";
 
   if (action === "local") {
     await updateJob(id, {
@@ -33,6 +32,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       progress: 0,
       bytesDownloaded: null,
     });
+  } else if (action === "pick") {
+    const fileId = body?.fileId as string | undefined;
+    if (!fileId) return NextResponse.json({ error: "fileId required" }, { status: 400 });
+    const ok = await pickJobFile(job, fileId);
+    if (!ok) return NextResponse.json({ error: "File no longer available" }, { status: 409 });
   } else {
     await retryJob(id);
   }

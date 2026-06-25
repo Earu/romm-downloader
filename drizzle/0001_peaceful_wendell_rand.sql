@@ -1,1 +1,0 @@
-ALTER TABLE `download_jobs` ADD `minerva_so_id` integer;

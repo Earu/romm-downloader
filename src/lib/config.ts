@@ -19,6 +19,15 @@ export interface AppConfig {
   igdbClientId: string;
   igdbClientSecret: string;
   downloadTmpDir: string;
+  /**
+   * Optional path to RomM's ROMs directory (the one containing per-platform
+   * folders, usually `<romm-library>/roms`), shared with this app on disk. When
+   * set, multi-file releases are written into a per-game folder there and scanned
+   * so RomM groups them into ONE library entry — something RomM's HTTP upload API
+   * can't do (it can't create the folder). Unset → files upload over HTTP as
+   * separate entries.
+   */
+  rommLibraryPath: string;
 }
 
 const DEFAULT_MAX_DEBRID_GB = 30;
@@ -33,6 +42,7 @@ function fromEnv(): AppConfig {
     igdbClientId: process.env.IGDB_CLIENT_ID ?? "",
     igdbClientSecret: process.env.IGDB_CLIENT_SECRET ?? "",
     downloadTmpDir: process.env.DOWNLOAD_TMP_DIR ?? "./data/downloads",
+    rommLibraryPath: process.env.ROMM_LIBRARY_PATH ?? "",
   };
 }
 
@@ -50,6 +60,7 @@ export async function getConfig(): Promise<AppConfig> {
       igdbClientId: row.igdbClientId || env.igdbClientId,
       igdbClientSecret: row.igdbClientSecret || env.igdbClientSecret,
       downloadTmpDir: row.downloadTmpDir || env.downloadTmpDir,
+      rommLibraryPath: env.rommLibraryPath,
     };
   } catch {
     // DB may not be migrated yet; fall back to env so /api/health still works.
