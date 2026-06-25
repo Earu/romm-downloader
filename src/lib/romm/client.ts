@@ -264,7 +264,7 @@ export class RommClient {
    * set of metadata sources to use — an empty list scans files only, so we derive
    * the enabled sources from the heartbeat and pass them along.
    */
-  async triggerScan(platformId?: number): Promise<boolean> {
+  async triggerScan(platformId?: number, romIds?: number[]): Promise<boolean> {
     let apis: string[] = [];
     try {
       const hb = await this.heartbeat();
@@ -288,9 +288,11 @@ export class RommClient {
           platforms: platformId != null ? [platformId] : [],
           // "quick" discovers newly-added files and matches metadata for them
           // using the sources in `apis`. (Valid types: quick, complete, hashes,
-          // update, unmatched, new_platforms.)
+          // update, unmatched, new_platforms.) Passing roms_ids re-reads those
+          // ROMs' folders — needed so a multi-file folder picks up every file,
+          // not just the one present when it was first registered.
           type: "quick",
-          roms_ids: [],
+          roms_ids: romIds ?? [],
           apis,
         });
         // Give RomM a moment to enqueue the job, then disconnect.

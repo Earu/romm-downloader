@@ -1,8 +1,14 @@
-# Standalone deployment of romm-downloader. It talks to your RomM server and
-# TorBox purely over HTTP — no shared volumes with RomM required.
+# Standalone deployment of romm-downloader. It talks to your RomM server over
+# HTTP. You log in with your RomM credentials in the app (it auto-provisions a
+# client token), so no ROMM_TOKEN is needed.
 #
-#   cp .env.example .env   # fill in ROMM_URL, ROMM_TOKEN, TORBOX_API_KEY, IGDB_*
+#   cp .env.example .env   # fill in AUTH_SECRET, DEBRID_*, IGDB_*, ROMM_URL
 #   docker compose -f docker-compose.example.yml up -d --build
+#
+# To group multi-file releases (e.g. a Switch base game + updates + DLC) into a
+# SINGLE RomM entry, the app must share RomM's library on disk — see the
+# ROMM_LIBRARY_PATH lines below. Without it, each file becomes its own entry (or
+# you pick one in the app). For a combined local stack, see romm/docker-compose.yml.
 services:
   romm-downloader:
     build: .
@@ -12,14 +18,25 @@ services:
     ports:
       - "3000:3000"
     environment:
+      # Pre-filled on the login screen; the app reaches RomM at this URL.
       - ROMM_URL=${ROMM_URL}
-      - ROMM_TOKEN=${ROMM_TOKEN}
-      - TORBOX_API_KEY=${TORBOX_API_KEY}
+      # Signs login session cookies. Generate with: openssl rand -hex 32
+      - AUTH_SECRET=${AUTH_SECRET}
+      # Debrid provider: none | torbox | realdebrid | alldebrid | premiumize
+      - DEBRID_PROVIDER=${DEBRID_PROVIDER:-none}
+      - DEBRID_API_KEY=${DEBRID_API_KEY:-}
+      - MAX_DEBRID_GB=${MAX_DEBRID_GB:-30}
+      # Catalog metadata (Twitch/IGDB app).
       - IGDB_CLIENT_ID=${IGDB_CLIENT_ID:-}
       - IGDB_CLIENT_SECRET=${IGDB_CLIENT_SECRET:-}
+      # --- Optional shared-library grouping (uncomment + mount below) ---
+      # - ROMM_LIBRARY_PATH=/romm/library/roms
+      # - DOWNLOAD_TMP_DIR=/romm/library/.romm-downloader-tmp
     volumes:
       # Persists the SQLite DB (jobs/settings) and in-flight downloads.
       - romm_downloader_data:/app/data
+      # --- Optional: mount RomM's library here to enable ROMM_LIBRARY_PATH ---
+      # - /path/to/romm/library:/romm/library
 
 volumes:
   romm_downloader_data:

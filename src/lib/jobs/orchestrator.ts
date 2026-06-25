@@ -574,9 +574,8 @@ async function placeInSharedLibrary(
   // a per-game folder to group them. A single file goes straight to the platform
   // dir, matching RomM's normal single-file layout.
   const grouped = job.debridId ? (await countJobsByDebridId(job.debridId)) > 1 : false;
-  const destDir = grouped
-    ? join(libraryRoot, fsSlug, sanitizeFolderName(job.title))
-    : join(libraryRoot, fsSlug);
+  const folderName = grouped ? sanitizeFolderName(job.title) : null;
+  const destDir = folderName ? join(libraryRoot, fsSlug, folderName) : join(libraryRoot, fsSlug);
   const finalPath = join(destDir, filename);
   try {
     await mkdir(destDir, { recursive: true });
@@ -595,7 +594,16 @@ async function placeInSharedLibrary(
     return false; // not mounted / not writable — fall back to HTTP upload
   }
 
-  await romm.triggerScan(job.targetPlatformId);
+  // For a grouped folder, a plain scan only registers the files present when the
+  // folder-ROM is first created; once it exists, RomM won't re-read the folder
+  // unless we target it. So if the folder-ROM already exists, rescan it by id —
+  // each sibling does this, so the last one in picks up every file.
+  let romIds: number[] | undefined;
+  if (folderName) {
+    const existing = await romm.findRomByFsName(folderName, job.targetPlatformId).catch(() => undefined);
+    if (existing) romIds = [existing.id];
+  }
+  await romm.triggerScan(job.targetPlatformId, romIds);
   return true;
 }
 
