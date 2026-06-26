@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { desc, eq, notInArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { type DownloadJob, downloadJobs, type JobState } from "@/lib/db/schema";
+import { clearDeadTorrent, torrentIdentity } from "./dead-torrents";
 
 const TERMINAL: JobState[] = ["done", "failed"];
 
@@ -19,6 +20,14 @@ export interface CreateJobInput {
 }
 
 export async function createJob(input: CreateJobInput): Promise<DownloadJob> {
+  // A user pasting a magnet is an explicit "try this" — trust their judgement and
+  // forget any prior dead-swarm record for it, so it's attempted again (and only
+  // re-recorded if it's still dead).
+  if (input.magnet) {
+    const identity = torrentIdentity({ magnetOrHash: input.magnet });
+    if (identity) await clearDeadTorrent(identity);
+  }
+
   const id = randomUUID();
   await db.insert(downloadJobs).values({
     id,

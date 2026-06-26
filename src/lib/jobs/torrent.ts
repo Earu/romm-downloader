@@ -14,6 +14,9 @@ export interface TorrentDownloadResult {
 
 export type TorrentProgress = (downloaded: number, total: number) => void;
 
+/** Thrown when the swarm is dead — nothing ever connected and no bytes arrived. */
+export class TorrentDeadError extends Error {}
+
 // aria2c binary — overridable if it isn't on PATH.
 const ARIA2C = process.env.ARIA2C_PATH || "aria2c";
 
@@ -195,7 +198,11 @@ export function downloadSelectedFile(
       proc.on("close", async (code) => {
         if (settled) return;
         if (code !== 0) {
-          await finish(new Error(describeAriaFailure(code, lastDownloaded, maxConns)));
+          const msg = describeAriaFailure(code, lastDownloaded, maxConns);
+          // Nothing ever connected and no bytes arrived: the swarm is dead, not
+          // merely slow — surface that so the caller can record it.
+          const dead = lastDownloaded === 0 && maxConns === 0;
+          await finish(dead ? new TorrentDeadError(msg) : new Error(msg));
           return;
         }
         // Locate the finished file: aria2's reported path, else by release name,

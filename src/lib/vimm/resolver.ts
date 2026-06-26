@@ -16,30 +16,56 @@ const VIMM_BASE = "https://vimm.net";
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
 
-/** RomM/IGDB platform slug → Vimm system code (verified against live search). */
+/**
+ * App platform slug → Vimm system code (the `system=` query param, which is also
+ * the `/vault/<code>` browse code). Covers every system Vimm hosts that the app
+ * also lists as a platform — verified against Vimm's live vault.
+ *
+ * Two Vimm vaults (Jaguar CD, WiiWare) have no corresponding app platform, so
+ * they're intentionally absent. Virtual Boy is mapped to its real code (`VB`) but
+ * Vimm's system-filtered search currently returns nothing for it, so the chooser
+ * will report no match despite the correct mapping.
+ */
 const SLUG_TO_VIMM: Record<string, string> = {
+  // Nintendo
   nes: "NES",
   snes: "SNES",
   n64: "N64",
+  gc: "GameCube",
+  wii: "Wii",
   gb: "GB",
   gbc: "GBC",
   gba: "GBA",
-  vb: "VBoy",
-  gc: "GameCube",
-  wii: "Wii",
   nds: "DS",
   "3ds": "3DS",
+  vb: "VB",
+  // Sega
   "genesis-slash-megadrive": "Genesis",
   "sega-master-system": "SMS",
   "game-gear": "GG",
   "sega-cd": "SegaCD",
-  "32x": "Sega32X",
+  "32x": "32X",
   saturn: "Saturn",
   dreamcast: "Dreamcast",
+  // Sony
   ps: "PS1",
   ps2: "PS2",
   ps3: "PS3",
   psp: "PSP",
+  // Microsoft
+  xbox: "Xbox",
+  xbox360: "Xbox360",
+  // Atari
+  "atari-2600": "Atari2600",
+  "atari-5200": "Atari5200",
+  "atari-7800": "Atari7800",
+  "atari-lynx": "Lynx",
+  "atari-jaguar": "Jaguar",
+  // NEC
+  "turbografx-16--1": "TG16",
+  "turbografx-cd": "TGCD",
+  // Philips
+  cdi: "CDi",
 };
 
 export interface VimmResolved {
@@ -64,11 +90,18 @@ export function vimmHeaders(): Record<string, string> {
   return { "User-Agent": UA, Referer: `${VIMM_BASE}/` };
 }
 
-/** Strip extension + (region)/[tag] noise to get a clean search/display title. */
+/**
+ * Strip extension + (region)/[tag] noise and reduce to a plain word query.
+ * Vimm's search tokenizes on any non-alphanumeric run (it treats "F-Zero" and
+ * "F Zero" identically), so a No-Intro " - " subtitle separator otherwise leaves
+ * a stray "-" token that matches nothing (titles like "Halo: Combat Evolved" use
+ * ":"). Folding all punctuation to spaces matches Vimm's own tokenization.
+ */
 function cleanTitle(raw: string): string {
   return raw
     .replace(/\.[a-z0-9]{1,4}$/i, "")
     .replace(/[([][^)\]]*[)\]]/g, " ")
+    .replace(/[^A-Za-z0-9]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
