@@ -61,6 +61,23 @@ export type DownloadJob = typeof downloadJobs.$inferSelect;
 export type NewDownloadJob = typeof downloadJobs.$inferInsert;
 
 /**
+ * Torrents whose swarm was found dead (no seeders/peers) by the built-in client.
+ * Keyed by a stable swarm identity (info hash / torrent URL / Minerva path) so a
+ * later attempt on the same torrent warns immediately instead of waiting out the
+ * client's stall timeout. See lib/jobs/dead-torrents.ts.
+ */
+export const deadTorrents = sqliteTable("dead_torrents", {
+  id: text("id").primaryKey(), // "btih:<hash>" / "src:<url>" / "minerva:<path>"
+  title: text("title"),
+  reason: text("reason").notNull(),
+  detectedAt: integer("detected_at", { mode: "timestamp_ms" })
+    .notNull()
+    .default(sql`(unixepoch() * 1000)`),
+});
+
+export type DeadTorrent = typeof deadTorrents.$inferSelect;
+
+/**
  * Single-row table (id=1) holding runtime-overridable settings. Env vars are the
  * default/fallback; values here take precedence when set (Settings page writes here).
  */

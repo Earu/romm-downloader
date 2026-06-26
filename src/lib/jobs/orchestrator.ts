@@ -72,8 +72,9 @@ import {
   vimmSupportsPlatform,
 } from "@/lib/vimm/resolver";
 import { streamUrlToFile } from "./download";
+import { getDeadTorrent, recordDeadTorrent, torrentIdentity } from "./dead-torrents";
 import { countJobsByDebridId, createDebridFetchJob, failJob, updateJob } from "./queue";
-import { downloadSelectedFile } from "./torrent";
+import { downloadSelectedFile, TorrentDeadError } from "./torrent";
 
 /** Advance a single job by one step. Long steps (fetch/upload) run to completion. */
 export async function advanceJob(job: DownloadJob): Promise<void> {
@@ -465,6 +466,18 @@ async function handleLocalFetching(job: DownloadJob, tmpDir: string): Promise<vo
     await failJob(job.id, "No Minerva path or magnet for local torrent download");
     return;
   }
+
+  // If this swarm was already found dead, don't sit through the stall timeout
+  // again — park the job straight away with the recorded warning.
+  const identity = torrentIdentity(job);
+  if (identity) {
+    const dead = await getDeadTorrent(identity);
+    if (dead) {
+      await updateJob(job.id, { state: "unavailable", error: dead.reason });
+      return;
+    }
+  }
+
   const jobDir = join(tmpDir, job.id);
   await mkdir(jobDir, { recursive: true });
 
@@ -504,12 +517,15 @@ async function handleLocalFetching(job: DownloadJob, tmpDir: string): Promise<vo
       },
     );
   } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    // A confirmed-dead swarm (no peers ever) is permanent — remember it so the
+    // next attempt warns immediately instead of waiting out the stall timeout.
+    if (e instanceof TorrentDeadError && identity) {
+      await recordDeadTorrent(identity, job.title, msg);
+    }
     // A dead torrent isn't a dead end — park the job so the user can fall back to
     // Vimm's Lair (a reliable direct download) or grab the magnet to do it manually.
-    await updateJob(job.id, {
-      state: "unavailable",
-      error: e instanceof Error ? e.message : String(e),
-    });
+    await updateJob(job.id, { state: "unavailable", error: msg });
     return;
   }
 
