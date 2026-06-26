@@ -91,9 +91,9 @@ async function syncDb(): Promise<number> {
   await rm(tmp, { force: true });
   let bytes: number;
   try {
-    bytes = await streamUrlToFile(MINERVA_DB_URL, tmp, (d, t) => {
+    ({ bytes } = await streamUrlToFile(MINERVA_DB_URL, tmp, (d, t) => {
       live.progress = t ? Math.round((d / t) * 100) : 0;
-    });
+    }));
   } catch (e) {
     // Download failed — clean up the partial temp file; keep existing db intact.
     await rm(tmp, { force: true });

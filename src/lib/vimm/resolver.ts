@@ -47,7 +47,8 @@ export interface VimmResolved {
   url: string;
   /** Headers Vimm requires (UA + Referer). */
   headers: Record<string, string>;
-  /** Clean filename to store in RomM (Vimm serves a zip). */
+  /** Real ROM name from the vault page (e.g. "...iso"), for display while
+   *  downloading. The actual archive name comes from the download response. */
   fileName: string;
   /** The vault page, for reference/logging. */
   vaultUrl: string;
@@ -149,18 +150,17 @@ function parseVaultPage(html: string): { url: string; fileName: string } | null 
   const mediaId = idM[1];
   const url = `https:${hostM[1]}?mediaId=${mediaId}`;
 
-  // The embedded `media` JSON carries the real filename (base64 GoodTitle).
-  let fileName = `vimm-${mediaId}.zip`;
+  // The embedded `media` JSON carries the real ROM filename (base64 GoodTitle),
+  // e.g. "...iso" for a disc. Use it as-is for display — the actual archive
+  // extension (.7z/.zip) and the final extracted name are resolved at
+  // download/upload time, so don't guess the extension here.
+  let fileName = `vimm-${mediaId}`;
   const mediaM = /let\s+media\s*=\s*(\[[\s\S]*?\]);/.exec(html);
   if (mediaM) {
     try {
       const media = JSON.parse(mediaM[1]) as { GoodTitle?: string }[];
       const good = media[0]?.GoodTitle;
-      if (good) {
-        const decoded = Buffer.from(good, "base64").toString("utf8");
-        // Vimm serves a zip; replace the inner ROM extension with .zip.
-        fileName = decoded.replace(/\.[^.]+$/, "") + ".zip";
-      }
+      if (good) fileName = Buffer.from(good, "base64").toString("utf8");
     } catch {
       // keep the fallback name
     }

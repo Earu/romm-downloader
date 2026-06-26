@@ -22,8 +22,9 @@ ENV NODE_ENV=production \
     DOWNLOAD_TMP_DIR=/app/data/downloads
 
 # aria2 powers the built-in torrent fallback (selective single-file download
-# from Minerva's bundle torrents, which TorBox can't serve).
-RUN apk add --no-cache aria2
+# from Minerva's bundle torrents, which TorBox can't serve). p7zip (7za) extracts
+# disc images from .zip/.7z archives (Vimm serves disc games as .7z).
+RUN apk add --no-cache aria2 p7zip
 
 # Standalone server + static assets + migrations.
 COPY --from=builder /app/.next/standalone ./

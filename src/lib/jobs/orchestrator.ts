@@ -1,8 +1,14 @@
 import "server-only";
-import { createWriteStream } from "node:fs";
+import { execFile } from "node:child_process";
+import { createWriteStream, existsSync } from "node:fs";
 import { copyFile, mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
+import { promisify } from "node:util";
 import unzipper from "unzipper";
+
+const execFileP = promisify(execFile);
+// 7-Zip CLI (alpine `p7zip` provides `7z`); handles both .zip and .7z. Overridable.
+const SEVENZIP = process.env.SEVENZIP_PATH || "7z";
 import { type AppConfig, getConfig } from "@/lib/config";
 import {
   type AcquireHint,
@@ -170,12 +176,40 @@ const DISC_PLATFORMS = new Set([
   "saturn", "dreamcast", "sega-cd", "turbografx-cd", "neo-geo-cd", "pc-fx", "3do", "cdi",
 ]);
 
-/** Names of the real content entries in a zip (skipping scans/nfo/etc.). */
-async function listZipContentEntries(zipPath: string): Promise<string[]> {
-  const dir = await unzipper.Open.file(zipPath);
-  return dir.files
-    .filter((f: unzipper.File) => f.type === "File" && !IGNORE_EXT.has(extOf(basename(f.path))))
-    .map((f: unzipper.File) => f.path);
+/** Content file paths inside a .zip/.7z (skipping scans/nfo/dirs), via 7z. */
+async function listArchiveEntries(archivePath: string): Promise<string[]> {
+  const { stdout } = await execFileP(SEVENZIP, ["l", "-slt", "-ba", archivePath], {
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  const out: string[] = [];
+  for (const block of stdout.split(/\r?\n\r?\n/)) {
+    const pathM = /^Path = (.+)$/m.exec(block);
+    const attrM = /^Attributes = (.*)$/m.exec(block);
+    if (!pathM || !attrM) continue; // skip the archive-info block (no Attributes)
+    if (/D/.test(attrM[1])) continue; // directory
+    const path = pathM[1].trim();
+    if (IGNORE_EXT.has(extOf(basename(path)))) continue;
+    out.push(path);
+  }
+  return out;
+}
+
+/** Extract a single inner file from a .zip/.7z to destDir (flat), via 7z. */
+async function extractArchiveFile(
+  archivePath: string,
+  innerPath: string,
+  destDir: string,
+): Promise<string | null> {
+  await mkdir(destDir, { recursive: true });
+  try {
+    await execFileP(SEVENZIP, ["e", "-y", `-o${destDir}`, archivePath, innerPath], {
+      maxBuffer: 16 * 1024 * 1024,
+    });
+    const out = join(destDir, basename(innerPath));
+    return existsSync(out) ? out : null;
+  } catch {
+    return null;
+  }
 }
 
 async function handleResolve(job: DownloadJob, hasDebrid: boolean): Promise<void> {
@@ -457,7 +491,7 @@ async function handleFetching(
   // Persist progress on a ~1s cadence (not per-5%) so the Downloads page can
   // derive a live network speed / ETA from successive byte readings.
   let lastWrite = 0;
-  const bytes = await streamUrlToFile(url, dest, (downloaded, total) => {
+  const { bytes } = await streamUrlToFile(url, dest, (downloaded, total) => {
     const now = Date.now();
     if (now - lastWrite >= 1000) {
       lastWrite = now;
@@ -471,20 +505,23 @@ async function handleFetching(
 /**
  * Download a file directly over HTTP from `job.sourceUrl` (e.g. a Vimm's Lair
  * fallback) into the tmp dir, then hand off to upload. Reuses the generic
- * streamer; Vimm needs a browser UA + Referer.
+ * streamer; Vimm needs a browser UA + Referer. The real filename/extension
+ * (Vimm serves disc games as `.7z`) comes from the response, not the resolver.
  */
 async function handleHttpFetching(job: DownloadJob, tmpDir: string): Promise<void> {
-  if (!job.sourceUrl || !job.uploadedFilename) {
+  if (!job.sourceUrl) {
     await failJob(job.id, "Missing source URL for HTTP download");
     return;
   }
-  const dest = join(tmpDir, job.id, job.uploadedFilename);
+  const jobDir = join(tmpDir, job.id);
+  await mkdir(jobDir, { recursive: true });
+  const tmpPath = join(jobDir, ".download.part");
   const headers = job.sourceUrl.includes("vimm.net") ? vimmHeaders() : undefined;
 
   let lastWrite = 0;
-  const bytes = await streamUrlToFile(
+  const { bytes, filename } = await streamUrlToFile(
     job.sourceUrl,
-    dest,
+    tmpPath,
     (downloaded, total) => {
       const now = Date.now();
       if (now - lastWrite >= 1000) {
@@ -499,7 +536,21 @@ async function handleHttpFetching(job: DownloadJob, tmpDir: string): Promise<voi
     },
     headers,
   );
-  await updateJob(job.id, { state: "uploading", bytesDownloaded: bytes, progress: 0 });
+
+  // Use the server-suggested name (Vimm reveals the real archive extension here).
+  const name = filename || job.uploadedFilename || basename(job.sourceUrl);
+  const finalPath = join(jobDir, name);
+  await rename(tmpPath, finalPath).catch(async () => {
+    await copyFile(tmpPath, finalPath);
+    await rm(tmpPath, { force: true }).catch(() => {});
+  });
+  await updateJob(job.id, {
+    state: "uploading",
+    uploadedFilename: name,
+    releaseName: name, // keep equal so handleUploading doesn't treat it as a collection archive
+    bytesDownloaded: bytes,
+    progress: 0,
+  });
 }
 
 async function handleUploading(
@@ -536,15 +587,18 @@ async function handleUploading(
     // upload the archive so the job doesn't silently fail.
   }
 
-  // Disc-based system packed as a .zip (Myrient's layout): standalone emulators
-  // can't boot a zipped image, so extract the real disc file (.iso/.cso/.bin…)
-  // and hand RomM that instead. Single-image discs are the common case (PSP, PS2,
-  // GameCube, Wii, Xbox); a multi-file disc (e.g. PS1 .bin+.cue) is left zipped
-  // for now since it needs its own folder.
-  if (DISC_PLATFORMS.has(job.targetPlatformSlug) && uploadFilename.toLowerCase().endsWith(".zip")) {
-    const entries = await listZipContentEntries(uploadPath).catch(() => [] as string[]);
+  // Disc-based system packed as an archive: Myrient/torrents use .zip, Vimm serves
+  // disc games as .7z. Standalone emulators (PPSSPP, PCSX2, Dolphin…) can't boot a
+  // zipped/7z image, so extract the raw disc file (.iso/.cso/.bin…). Also unpack
+  // any .7z regardless of platform since .7z isn't widely emulator-readable.
+  // Single-image discs are the common case; a multi-file disc (PS1 .bin+.cue) is
+  // left as the archive for now (needs its own folder).
+  const archiveExt = extOf(uploadFilename);
+  const isArchive = archiveExt === ".zip" || archiveExt === ".7z";
+  if (isArchive && (DISC_PLATFORMS.has(job.targetPlatformSlug) || archiveExt === ".7z")) {
+    const entries = await listArchiveEntries(uploadPath).catch(() => [] as string[]);
     if (entries.length === 1) {
-      const extracted = await extractRomFromZip(uploadPath, basename(entries[0]), join(jobDir, "extracted"));
+      const extracted = await extractArchiveFile(uploadPath, entries[0], join(jobDir, "extracted"));
       if (extracted) {
         uploadPath = extracted;
         uploadFilename = basename(extracted);
