@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getRommClient } from "@/lib/clients";
 import { createJob, listJobs } from "@/lib/jobs/queue";
+import { toRommFsSlug } from "@/lib/platforms";
 
 export const dynamic = "force-dynamic";
 
@@ -39,7 +40,7 @@ export async function POST(req: Request) {
     // Platform doesn't exist in RomM yet — create it now using the fs_slug.
     try {
       const client = await getRommClient();
-      const created = await client.createPlatform(input.platformSlug);
+      const created = await client.createPlatform(toRommFsSlug(input.platformSlug));
       platformId = created.id;
     } catch (e) {
       return NextResponse.json(

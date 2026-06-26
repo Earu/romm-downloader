@@ -81,9 +81,11 @@ interface Candidate {
   id: string;
   title: string;
   region?: string; // from the row's flag image, e.g. "usa" / "europe" / "japan"
+  extras?: string[]; // "Demo" / "Prototype" / "Translated" / "Unlicensed" / "Bonus Disc"
+  version?: string; // revision, e.g. "1.0" / "1.1"
 }
 
-/** Parse `/vault/<id>">Title` rows (with region flag) out of a Vimm list page. */
+/** Parse `/vault/<id>">Title` rows (title, region, extras, version) from a list page. */
 function parseSearchResults(html: string): Candidate[] {
   const out: Candidate[] = [];
   // Vimm's result rows use `href= "/vault/<id>">Title</a>` (note the space after
@@ -94,9 +96,24 @@ function parseSearchResults(html: string): Candidate[] {
   while ((m = re.exec(html))) {
     const title = m[2].trim();
     if (!title) continue;
-    // The region flag for this row sits in the next cell; grab the first one.
-    const flag = /flags\/([a-z-]+)\.png/i.exec(html.slice(re.lastIndex, re.lastIndex + 300));
-    out.push({ id: m[1], title, region: flag?.[1]?.toLowerCase() });
+    // The rest of this row up to the next row holds the extras badges (in the
+    // title cell), the region flag cell, and the version cell.
+    const row = html.slice(re.lastIndex, re.lastIndex + 600);
+    const titleCell = row.slice(0, row.indexOf("</td>") + 1 || row.length);
+    // Extras like Demo/Prototype are `<b class="redBorder" ... title="Demo">`.
+    const extras = [...titleCell.matchAll(/class="redBorder"[^>]*title="([^"]+)"/gi)].map(
+      (x) => x[1].trim(),
+    );
+    const flag = /flags\/([a-z-]+)\.png/i.exec(row);
+    // Version sits in its own centered cell after the flag cell (e.g. ">1.0<").
+    const ver = /text-align:center"[^>]*>\s*(\d+\.\d+)\s*</.exec(row);
+    out.push({
+      id: m[1],
+      title,
+      region: flag?.[1]?.toLowerCase(),
+      extras: extras.length ? extras : undefined,
+      version: ver?.[1],
+    });
   }
   return out;
 }
@@ -109,27 +126,22 @@ function regionBonus(region?: string): number {
   return 0;
 }
 
-/** Pick the candidate whose title best matches the query (USA preferred). */
-function pickBest(candidates: Candidate[], query: string): Candidate | null {
+/** Relevance score for ordering candidates (higher = better; USA preferred). */
+function scoreCandidate(c: Candidate, query: string): number {
   const q = normalize(query);
-  let best: { c: Candidate; score: number } | null = null;
-  for (const c of candidates) {
-    const t = normalize(c.title);
-    let score = 0;
-    if (t === q) score = 100;
-    else if (t.startsWith(q) || q.startsWith(t)) score = 60;
-    else if (t.includes(q)) score = 40;
-    else {
-      const qt = q.split(" ");
-      const hit = qt.filter((w) => w.length > 1 && t.includes(w)).length;
-      score = (hit / Math.max(1, qt.length)) * 30;
-    }
-    score -= Math.abs(t.length - q.length) * 0.05; // prefer closest-length match
-    score += regionBonus(c.region);
-    if (!best || score > best.score) best = { c, score };
+  const t = normalize(c.title);
+  let score = 0;
+  if (t === q) score = 100;
+  else if (t.startsWith(q) || q.startsWith(t)) score = 60;
+  else if (t.includes(q)) score = 40;
+  else {
+    const qt = q.split(" ");
+    const hit = qt.filter((w) => w.length > 1 && t.includes(w)).length;
+    score = (hit / Math.max(1, qt.length)) * 30;
   }
-  // Require a minimum confidence so we don't grab an unrelated game.
-  return best && best.score >= 20 ? best.c : null;
+  score -= Math.abs(t.length - q.length) * 0.05; // prefer closest-length match
+  score -= (c.extras?.length ?? 0) * 25; // sink demos/prototypes below clean dumps
+  return score + regionBonus(c.region);
 }
 
 async function fetchText(url: string): Promise<string | null> {
@@ -168,33 +180,55 @@ function parseVaultPage(html: string): { url: string; fileName: string } | null 
   return { url, fileName };
 }
 
+/** A pickable Vimm result (one version/region of a game) for the chooser. */
+export interface VimmCandidate {
+  vaultId: string;
+  title: string;
+  region?: string;
+  /** Extra qualifiers (Demo / Prototype / Translated / Unlicensed / Bonus Disc). */
+  extras?: string[];
+  /** Revision, e.g. "1.0" / "1.1". */
+  version?: string;
+}
+
 /**
- * Resolve a game to a Vimm's Lair direct download. Returns null if the platform
- * isn't on Vimm, nothing matches confidently, or the page can't be parsed.
+ * Search Vimm's Lair for a game on a platform and return the candidate versions
+ * (different regions/revisions), best match first. Empty if the platform isn't
+ * on Vimm or nothing was found.
  */
-export async function resolveVimm(
+export async function searchVimmCandidates(
   rawTitle: string,
   platformSlug: string,
-): Promise<VimmResolved | null> {
+): Promise<VimmCandidate[]> {
   const system = SLUG_TO_VIMM[platformSlug];
-  if (!system) return null;
-
+  if (!system) return [];
   const query = cleanTitle(rawTitle);
-  if (query.length < 2) return null;
+  if (query.length < 2) return [];
 
-  const searchUrl = `${VIMM_BASE}/vault/?p=list&q=${encodeURIComponent(query)}&system=${encodeURIComponent(system)}`;
-  const listHtml = await fetchText(searchUrl);
-  if (!listHtml) return null;
+  const url = `${VIMM_BASE}/vault/?p=list&q=${encodeURIComponent(query)}&system=${encodeURIComponent(system)}`;
+  const html = await fetchText(url);
+  if (!html) return [];
 
-  const best = pickBest(parseSearchResults(listHtml), query);
-  if (!best) return null;
+  const seen = new Set<string>();
+  return parseSearchResults(html)
+    .filter((c) => (seen.has(c.id) ? false : (seen.add(c.id), true)))
+    .sort((a, b) => scoreCandidate(b, query) - scoreCandidate(a, query))
+    .map((c) => ({
+      vaultId: c.id,
+      title: c.title,
+      region: c.region,
+      extras: c.extras,
+      version: c.version,
+    }));
+}
 
-  const vaultUrl = `${VIMM_BASE}/vault/${best.id}`;
-  const vaultHtml = await fetchText(vaultUrl);
-  if (!vaultHtml) return null;
-
-  const parsed = parseVaultPage(vaultHtml);
+/** Resolve a chosen Vimm vault id to its direct download URL + ROM filename. */
+export async function resolveVimmVault(vaultId: string): Promise<VimmResolved | null> {
+  if (!/^\d+$/.test(vaultId)) return null;
+  const vaultUrl = `${VIMM_BASE}/vault/${vaultId}`;
+  const html = await fetchText(vaultUrl);
+  if (!html) return null;
+  const parsed = parseVaultPage(html);
   if (!parsed) return null;
-
   return { url: parsed.url, headers: vimmHeaders(), fileName: parsed.fileName, vaultUrl };
 }

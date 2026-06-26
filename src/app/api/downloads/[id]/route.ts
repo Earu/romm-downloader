@@ -16,7 +16,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
  * - retry: reset a failed job to the start.
  * - local: an "unavailable" job opts into the built-in torrent client.
  * - pick: a "multi_file" job commits to a single file (`fileId`) and proceeds.
- * - vimm: resolve the game on Vimm's Lair and download it directly over HTTP.
+ * - vimm: download a chosen Vimm's Lair file (`vaultId`) directly over HTTP.
  */
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -39,8 +39,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     const ok = await pickJobFile(job, fileId);
     if (!ok) return NextResponse.json({ error: "File no longer available" }, { status: 409 });
   } else if (action === "vimm") {
-    const ok = await startVimmFallback(job);
-    if (!ok) return NextResponse.json({ error: "No match on Vimm's Lair" }, { status: 409 });
+    const vaultId = body?.vaultId as string | undefined;
+    if (!vaultId) return NextResponse.json({ error: "vaultId required" }, { status: 400 });
+    const ok = await startVimmFallback(job, vaultId);
+    if (!ok) return NextResponse.json({ error: "Couldn't resolve that Vimm download" }, { status: 409 });
   } else {
     await retryJob(id);
   }
