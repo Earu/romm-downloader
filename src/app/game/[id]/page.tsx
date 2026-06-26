@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { DownloadPanel, type RommPlatformOption } from "@/components/DownloadPanel";
 import { getCatalogProvider } from "@/lib/catalog";
 import { getRommClient } from "@/lib/clients";
-import { PLATFORM_BY_SLUG } from "@/lib/platforms";
+import { PLATFORM_BY_SLUG, toRommFsSlug } from "@/lib/platforms";
 
 export const dynamic = "force-dynamic";
 
@@ -52,7 +52,7 @@ export default async function GameDetailPage({
   const igdbSlugs = game.platforms.map((p) => p.slug).filter((s): s is string => !!s);
   const rommFsSlugs = new Set(rommPlatforms.map((p) => p.fsSlug));
   const suggestedSlug =
-    igdbSlugs.find((s) => rommFsSlugs.has(s) && PLATFORM_BY_SLUG.has(s)) ??
+    igdbSlugs.find((s) => rommFsSlugs.has(toRommFsSlug(s)) && PLATFORM_BY_SLUG.has(s)) ??
     igdbSlugs.find((s) => PLATFORM_BY_SLUG.has(s));
 
   return (

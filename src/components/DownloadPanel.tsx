@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { IconPlay, Spinner } from "@/components/icons";
-import { KNOWN_PLATFORMS, type KnownPlatform } from "@/lib/platforms";
+import { KNOWN_PLATFORMS, type KnownPlatform, toRommFsSlug } from "@/lib/platforms";
 
 export interface RommPlatformOption {
   id: number;
@@ -130,7 +130,7 @@ export function DownloadPanel({ game, rommPlatforms, suggestedSlug }: Props) {
     const useMagnet = magnetValid;
     if ((!useMagnet && !selected) || !selectedPlatform) return;
 
-    const existing = rommBySlug.get(selectedPlatform.slug);
+    const existing = rommBySlug.get(toRommFsSlug(selectedPlatform.slug));
     const platformSlug = selectedPlatform.slug;
     const platformId = existing?.id; // undefined → API will create it
 
@@ -277,7 +277,7 @@ export function DownloadPanel({ game, rommPlatforms, suggestedSlug }: Props) {
               placeholder="Search platforms…"
               className="steam-input w-64 pr-8"
             />
-            {selectedPlatform && rommBySlug.has(selectedPlatform.slug) && (
+            {selectedPlatform && rommBySlug.has(toRommFsSlug(selectedPlatform.slug)) && (
               <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-steam-green-light">
                 ✓
               </span>
@@ -288,7 +288,7 @@ export function DownloadPanel({ game, rommPlatforms, suggestedSlug }: Props) {
                   <p className="px-3 py-2 text-xs text-steam-muted">No platforms found</p>
                 ) : (
                   filteredPlatforms.map((p) => {
-                    const inRomm = rommBySlug.has(p.slug);
+                    const inRomm = rommBySlug.has(toRommFsSlug(p.slug));
                     return (
                       <button
                         key={p.slug}
@@ -316,7 +316,7 @@ export function DownloadPanel({ game, rommPlatforms, suggestedSlug }: Props) {
               </div>
             )}
           </div>
-          {selectedPlatform && !rommBySlug.has(selectedPlatform.slug) && (
+          {selectedPlatform && !rommBySlug.has(toRommFsSlug(selectedPlatform.slug)) && (
             <p className="text-xs text-amber-300">Will be created in RomM on submit</p>
           )}
         </div>

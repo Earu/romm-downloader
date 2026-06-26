@@ -91,3 +91,39 @@ export const KNOWN_PLATFORMS: KnownPlatform[] = [
 
 /** Map from slug → KnownPlatform for O(1) lookup. */
 export const PLATFORM_BY_SLUG = new Map(KNOWN_PLATFORMS.map((p) => [p.slug, p]));
+
+/**
+ * The app keys platforms by their IGDB slug, but RomM identifies platforms by its
+ * own UniversalPlatformSlug values — and for some consoles the two differ. Sending
+ * RomM an unknown fs_slug makes it create a generic, metadata-less platform (e.g.
+ * "ps" → a bare "Ps" instead of PlayStation), so games never match in RomM.
+ *
+ * This maps the divergent IGDB slugs to RomM's fs_slug. Slugs not listed here are
+ * identical in both systems. Verified against RomM's UniversalPlatformSlug enum.
+ */
+const IGDB_TO_ROMM_FS_SLUG: Record<string, string> = {
+  ps: "psx",
+  sfc: "sfam",
+  gc: "ngc",
+  vb: "virtualboy",
+  "sega-master-system": "sms",
+  "game-gear": "gamegear",
+  dreamcast: "dc",
+  "32x": "sega32",
+  "sega-cd": "segacd",
+  "genesis-slash-megadrive": "genesis",
+  "atari-2600": "atari2600",
+  "atari-5200": "atari5200",
+  "atari-7800": "atari7800",
+  "atari-lynx": "lynx",
+  "atari-jaguar": "jaguar",
+  "turbografx-16--1": "tg16",
+  "neo-geo-aes": "neogeoaes",
+  "apple-ii": "appleii",
+  cdi: "philips-cd-i",
+};
+
+/** Translate the app's (IGDB) platform slug to the fs_slug RomM recognises. */
+export function toRommFsSlug(slug: string): string {
+  return IGDB_TO_ROMM_FS_SLUG[slug] ?? slug;
+}

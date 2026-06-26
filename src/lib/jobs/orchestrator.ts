@@ -1,7 +1,7 @@
 import "server-only";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { createWriteStream, existsSync } from "node:fs";
-import { copyFile, mkdir, rename, rm, writeFile } from "node:fs/promises";
+import { copyFile, cp, mkdir, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { promisify } from "node:util";
 import unzipper from "unzipper";
@@ -9,6 +9,50 @@ import unzipper from "unzipper";
 const execFileP = promisify(execFile);
 // 7-Zip CLI (alpine `p7zip` provides `7z`); handles both .zip and .7z. Overridable.
 const SEVENZIP = process.env.SEVENZIP_PATH || "7z";
+
+/**
+ * Run a 7z extraction (args[0] is the command, e.g. "x"/"e"), reporting progress
+ * (0..100) by polling the output directory's size against `totalBytes` (the
+ * archive's uncompressed size). Extracting a multi-GB image takes minutes and
+ * drives the "Installing" bar — but 7-Zip suppresses its own percentage when
+ * stdout isn't a TTY, so we estimate from disk instead.
+ */
+function extractWithProgress(
+  args: string[],
+  progressDir: string,
+  totalBytes: number,
+  onProgress?: (pct: number) => void,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(SEVENZIP, args, { stdio: ["ignore", "ignore", "pipe"] });
+    let errTail = "";
+    proc.stderr?.on("data", (d: Buffer) => {
+      errTail = (errTail + d.toString()).slice(-300);
+    });
+    const timer =
+      onProgress && totalBytes > 0
+        ? setInterval(() => {
+            execFileP("du", ["-sk", progressDir])
+              .then(({ stdout }) => {
+                const kb = parseInt(stdout, 10);
+                if (!Number.isNaN(kb)) {
+                  onProgress(Math.min(99, Math.round(((kb * 1024) / totalBytes) * 100)));
+                }
+              })
+              .catch(() => {});
+          }, 1500)
+        : null;
+    const finish = (err?: Error) => {
+      if (timer) clearInterval(timer);
+      if (err) reject(err);
+      else resolve();
+    };
+    proc.on("error", finish);
+    proc.on("close", (code) =>
+      finish(code === 0 ? undefined : new Error(`7z exited ${code}: ${errTail.trim()}`)),
+    );
+  });
+}
 import { type AppConfig, getConfig } from "@/lib/config";
 import {
   type AcquireHint,
@@ -18,8 +62,15 @@ import {
 } from "@/lib/debrid";
 import type { DownloadJob } from "@/lib/db/schema";
 import { resolveMagnet } from "@/lib/minerva/client";
+import { toRommFsSlug } from "@/lib/platforms";
 import { RommClient } from "@/lib/romm/client";
-import { resolveVimm, vimmHeaders, vimmSupportsPlatform } from "@/lib/vimm/resolver";
+import {
+  type VimmCandidate,
+  resolveVimmVault,
+  searchVimmCandidates,
+  vimmHeaders,
+  vimmSupportsPlatform,
+} from "@/lib/vimm/resolver";
 import { streamUrlToFile } from "./download";
 import { countJobsByDebridId, createDebridFetchJob, failJob, updateJob } from "./queue";
 import { downloadSelectedFile } from "./torrent";
@@ -103,30 +154,31 @@ export async function pickJobFile(job: DownloadJob, fileId: string): Promise<boo
   return true;
 }
 
+/** Candidate Vimm's Lair versions for a job's game (for the chooser modal). */
+export async function listVimmCandidates(job: DownloadJob): Promise<VimmCandidate[]> {
+  if (!vimmSupportsPlatform(job.targetPlatformSlug)) return [];
+  return searchVimmCandidates(job.releaseName || job.title, job.targetPlatformSlug);
+}
+
 /**
- * Fallback: resolve the job's game on Vimm's Lair (a reliable per-game HTTP
- * source) and switch it to a direct HTTP download. Used when the torrent is dead
- * or the debrid provider can't serve it. Returns false (parking the job in
- * "unavailable") when the platform isn't on Vimm or nothing matches.
+ * Fallback: download a chosen Vimm's Lair file (`vaultId`) directly over HTTP.
+ * Used when the torrent is dead or the debrid provider can't serve it. The job's
+ * title/filename become the Vimm name. Returns false (parking the job in
+ * "unavailable") when the vault can't be resolved.
  */
-export async function startVimmFallback(job: DownloadJob): Promise<boolean> {
-  if (!vimmSupportsPlatform(job.targetPlatformSlug)) {
-    await updateJob(job.id, {
-      state: "unavailable",
-      error: `Vimm's Lair doesn't cover ${job.targetPlatformSlug}.`,
-    });
-    return false;
-  }
-  const resolved = await resolveVimm(job.releaseName || job.title, job.targetPlatformSlug);
+export async function startVimmFallback(job: DownloadJob, vaultId: string): Promise<boolean> {
+  const resolved = await resolveVimmVault(vaultId);
   if (!resolved) {
     await updateJob(job.id, {
       state: "unavailable",
-      error: `No match found on Vimm's Lair for "${job.title}".`,
+      error: `Couldn't resolve that Vimm's Lair download.`,
     });
     return false;
   }
   await updateJob(job.id, {
     state: "http_fetching",
+    // Show the Vimm filename in the UI (it replaces the original torrent name).
+    title: resolved.fileName,
     sourceUrl: resolved.url,
     uploadedFilename: resolved.fileName,
     releaseName: resolved.fileName, // keep equal so it's not treated as a collection archive
@@ -176,12 +228,16 @@ const DISC_PLATFORMS = new Set([
   "saturn", "dreamcast", "sega-cd", "turbografx-cd", "neo-geo-cd", "pc-fx", "3do", "cdi",
 ]);
 
-/** Content file paths inside a .zip/.7z (skipping scans/nfo/dirs), via 7z. */
-async function listArchiveEntries(archivePath: string): Promise<string[]> {
+/** Content files inside a .zip/.7z (skipping scans/nfo/dirs) + total uncompressed
+ *  bytes (for extraction-progress estimation), via 7z. */
+async function listArchiveEntries(
+  archivePath: string,
+): Promise<{ files: string[]; bytes: number }> {
   const { stdout } = await execFileP(SEVENZIP, ["l", "-slt", "-ba", archivePath], {
     maxBuffer: 64 * 1024 * 1024,
   });
-  const out: string[] = [];
+  const files: string[] = [];
+  let bytes = 0;
   for (const block of stdout.split(/\r?\n\r?\n/)) {
     const pathM = /^Path = (.+)$/m.exec(block);
     const attrM = /^Attributes = (.*)$/m.exec(block);
@@ -189,9 +245,11 @@ async function listArchiveEntries(archivePath: string): Promise<string[]> {
     if (/D/.test(attrM[1])) continue; // directory
     const path = pathM[1].trim();
     if (IGNORE_EXT.has(extOf(basename(path)))) continue;
-    out.push(path);
+    files.push(path);
+    const sizeM = /^Size = (\d+)$/m.exec(block);
+    if (sizeM) bytes += Number(sizeM[1]);
   }
-  return out;
+  return { files, bytes };
 }
 
 /** Extract a single inner file from a .zip/.7z to destDir (flat), via 7z. */
@@ -199,12 +257,17 @@ async function extractArchiveFile(
   archivePath: string,
   innerPath: string,
   destDir: string,
+  totalBytes = 0,
+  onProgress?: (pct: number) => void,
 ): Promise<string | null> {
   await mkdir(destDir, { recursive: true });
   try {
-    await execFileP(SEVENZIP, ["e", "-y", `-o${destDir}`, archivePath, innerPath], {
-      maxBuffer: 16 * 1024 * 1024,
-    });
+    await extractWithProgress(
+      ["e", "-y", `-o${destDir}`, archivePath, innerPath],
+      destDir,
+      totalBytes,
+      onProgress,
+    );
     const out = join(destDir, basename(innerPath));
     return existsSync(out) ? out : null;
   } catch {
@@ -589,20 +652,46 @@ async function handleUploading(
 
   // Disc-based system packed as an archive: Myrient/torrents use .zip, Vimm serves
   // disc games as .7z. Standalone emulators (PPSSPP, PCSX2, Dolphin…) can't boot a
-  // zipped/7z image, so extract the raw disc file (.iso/.cso/.bin…). Also unpack
-  // any .7z regardless of platform since .7z isn't widely emulator-readable.
-  // Single-image discs are the common case; a multi-file disc (PS1 .bin+.cue) is
-  // left as the archive for now (needs its own folder).
+  // zipped/7z image, so extract the raw content. Also unpack any .7z regardless of
+  // platform since .7z isn't widely emulator-readable.
+  //  - one content file (PSP/PS2/GC disc image) → extract it, upload normally.
+  //  - many files (PS3/Wii U game folder, multi-track disc) → extract into the
+  //    library as a folder ROM (needs the shared library; RomM can't be given a
+  //    folder over HTTP).
   const archiveExt = extOf(uploadFilename);
   const isArchive = archiveExt === ".zip" || archiveExt === ".7z";
   if (isArchive && (DISC_PLATFORMS.has(job.targetPlatformSlug) || archiveExt === ".7z")) {
-    const entries = await listArchiveEntries(uploadPath).catch(() => [] as string[]);
+    // Extraction of a multi-GB image is slow — drive the "Installing" bar with
+    // progress (throttled to ~1s).
+    let lastExtract = 0;
+    const onExtract = (pct: number) => {
+      const now = Date.now();
+      if (now - lastExtract >= 1000) {
+        lastExtract = now;
+        void updateJob(job.id, { progress: pct });
+      }
+    };
+    const { files: entries, bytes: totalBytes } = await listArchiveEntries(uploadPath).catch(
+      () => ({ files: [] as string[], bytes: 0 }),
+    );
     if (entries.length === 1) {
-      const extracted = await extractArchiveFile(uploadPath, entries[0], join(jobDir, "extracted"));
+      const extracted = await extractArchiveFile(
+        uploadPath, entries[0], join(jobDir, "extracted"), totalBytes, onExtract,
+      );
       if (extracted) {
         uploadPath = extracted;
         uploadFilename = basename(extracted);
       }
+    } else if (entries.length > 1 && rommLibraryPath) {
+      const folder = await extractArchiveToLibrary(
+        job, romm, rommLibraryPath, uploadPath, jobDir, entries, totalBytes, onExtract,
+      );
+      if (folder) {
+        await rm(jobDir, { recursive: true, force: true }).catch(() => {});
+        await updateJob(job.id, { state: "done", progress: 100, uploadedFilename: folder });
+        return;
+      }
+      // else: couldn't extract to the library — fall through and upload the archive.
     }
   }
 
@@ -716,6 +805,81 @@ function sanitizeFolderName(title: string): string {
   return title.replace(/[<>:"/\\|?*]+/g, " ").replace(/\s+/g, " ").trim();
 }
 
+/** The platform's real fs_slug from RomM (falls back to the job's slug). */
+async function resolvePlatformFsSlug(romm: RommClient, job: DownloadJob): Promise<string> {
+  try {
+    const platforms = await romm.listPlatforms();
+    const match = platforms.find((p) => p.id === job.targetPlatformId);
+    if (match?.fs_slug) return match.fs_slug;
+  } catch {
+    // fall back to the job's slug
+  }
+  return toRommFsSlug(job.targetPlatformSlug);
+}
+
+/**
+ * Extract a multi-file archive (a PS3/Wii U game folder, or a multi-track disc)
+ * straight into RomM's library so RomM registers it as one folder ROM. `entries`
+ * are the archive's content file paths (junk already filtered). Extracts into the
+ * job's tmp dir (same volume as the library), then moves the game folder into
+ * place. Returns false if the library isn't usable.
+ */
+async function extractArchiveToLibrary(
+  job: DownloadJob,
+  romm: RommClient,
+  libraryRoot: string,
+  archivePath: string,
+  jobDir: string,
+  entries: string[],
+  totalBytes = 0,
+  onProgress?: (pct: number) => void,
+): Promise<string | null> {
+  if (!(await isLibraryWritable(libraryRoot))) return null;
+  const platformDir = join(libraryRoot, await resolvePlatformFsSlug(romm, job));
+  const extractDir = join(jobDir, "extracted");
+  await rm(extractDir, { recursive: true, force: true }).catch(() => {});
+  await mkdir(extractDir, { recursive: true });
+  try {
+    await extractWithProgress(["x", "-y", `-o${extractDir}`, archivePath], extractDir, totalBytes, onProgress);
+  } catch {
+    return null;
+  }
+
+  // If the archive holds a single top-level folder (e.g. PS3 "Game/PS3_GAME/…"),
+  // that folder IS the game. Otherwise (loose files at the root, e.g. a .bin+.cue
+  // disc) wrap them in a per-game folder named after the title.
+  const top = new Set(entries.map((e) => e.split("/")[0]));
+  const nested = entries.some((e) => e.includes("/"));
+  let folderName: string;
+  let srcDir: string;
+  if (top.size === 1 && nested) {
+    folderName = [...top][0];
+    srcDir = join(extractDir, folderName);
+  } else {
+    folderName = sanitizeFolderName(job.title);
+    srcDir = join(extractDir, "__game__");
+    await mkdir(srcDir, { recursive: true });
+    for (const dirent of await readdir(extractDir, { withFileTypes: true })) {
+      if (dirent.isFile() && !IGNORE_EXT.has(extOf(dirent.name))) {
+        await rename(join(extractDir, dirent.name), join(srcDir, dirent.name));
+      }
+    }
+  }
+
+  await mkdir(platformDir, { recursive: true });
+  const dest = join(platformDir, folderName);
+  await rm(dest, { recursive: true, force: true }).catch(() => {});
+  try {
+    await rename(srcDir, dest); // instant when tmp shares the library's filesystem
+  } catch {
+    await cp(srcDir, dest, { recursive: true }); // cross-filesystem fallback
+  }
+
+  const existing = await romm.findRomByFsName(folderName, job.targetPlatformId).catch(() => undefined);
+  await romm.triggerScan(job.targetPlatformId, existing ? [existing.id] : undefined);
+  return folderName;
+}
+
 /**
  * Write a downloaded file straight into RomM's library, inside a per-game folder,
  * then scan. Files for the same title land in the same folder, so RomM groups
@@ -730,16 +894,8 @@ async function placeInSharedLibrary(
   srcPath: string,
   filename: string,
 ): Promise<boolean> {
-  // The folder must sit under the platform's real fs_slug; ask RomM for it,
-  // falling back to the slug the job was created with.
-  let fsSlug = job.targetPlatformSlug;
-  try {
-    const platforms = await romm.listPlatforms();
-    const match = platforms.find((p) => p.id === job.targetPlatformId);
-    if (match?.fs_slug) fsSlug = match.fs_slug;
-  } catch {
-    // Lookup failed — keep the job's slug.
-  }
+  // The folder must sit under the platform's real fs_slug.
+  const fsSlug = await resolvePlatformFsSlug(romm, job);
 
   // Only a multi-file set (fanned-out siblings sharing one debrid transfer) needs
   // a per-game folder to group them. A single file goes straight to the platform

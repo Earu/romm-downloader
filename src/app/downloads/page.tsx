@@ -85,6 +85,12 @@ function fmtSize(b: number | null | undefined): string {
   return `${(b / 1e6).toFixed(0)} MB`;
 }
 
+/** Drop a trailing file extension for display (e.g. ".iso"/".gba"/".7z"), but
+ *  leave version-y dots like "Game 1.5" alone (extension must contain a letter). */
+function stripExt(name: string): string {
+  return name.replace(/\.[a-z0-9]{1,5}$/i, (m) => (/[a-z]/i.test(m) ? "" : m));
+}
+
 function fmtSpeed(bytesPerSec: number): string {
   const mbps = (bytesPerSec * 8) / 1e6;
   if (mbps >= 1000) return `${(mbps / 1000).toFixed(1)} Gbps`;
@@ -211,10 +217,10 @@ function FeaturedDownload({
             <p className="text-[11px] font-semibold uppercase tracking-wide text-steam-blue-light">
               {stateLabel(job)}
             </p>
-            <h2 className="truncate text-3xl font-bold text-steam-bright">{job.title}</h2>
+            <h2 className="truncate text-3xl font-bold text-steam-bright">{stripExt(job.title)}</h2>
             <p className="mt-0.5 truncate text-xs text-steam-muted">
               → {job.targetPlatformSlug}
-              {job.releaseName ? ` · ${job.releaseName}` : ""}
+              {job.releaseName ? ` · ${stripExt(job.releaseName)}` : ""}
             </p>
           </div>
         </div>
@@ -278,7 +284,15 @@ function FeaturedDownload({
   );
 }
 
-function QueueRow({ job, onChange }: { job: Job; onChange: () => void }) {
+function QueueRow({
+  job,
+  onChange,
+  onPickVimm,
+}: {
+  job: Job;
+  onChange: () => void;
+  onPickVimm?: (id: string) => void;
+}) {
   const terminal = job.state === "done" || job.state === "failed";
   // Anything not actively transferring can be removed — including a job wedged in
   // "Queued" — so a stuck queue is always clearable. (Active states would orphan
@@ -302,10 +316,10 @@ function QueueRow({ job, onChange }: { job: Job; onChange: () => void }) {
         )}
       </div>
       <div className="min-w-0 flex-1">
-        <p className="truncate text-base font-bold text-steam-bright">{job.title}</p>
+        <p className="truncate text-base font-bold text-steam-bright">{stripExt(job.title)}</p>
         <p className="truncate text-sm text-steam-muted">
           {fmtSize(job.bytesTotal)}
-          {job.releaseName ? ` · ${job.releaseName}` : ""}
+          {job.releaseName ? ` · ${stripExt(job.releaseName)}` : ""}
         </p>
         {job.error && <p className="truncate text-sm text-red-400">{job.error}</p>}
       </div>
@@ -315,12 +329,9 @@ function QueueRow({ job, onChange }: { job: Job; onChange: () => void }) {
         </span>
       )}
       <div className="flex shrink-0 gap-1.5 opacity-0 transition group-hover:opacity-100 focus-within:opacity-100">
-        {job.state === "failed" && (
+        {job.state === "failed" && onPickVimm && (
           <button
-            onClick={async () => {
-              await api(job.id, "POST", { action: "vimm" });
-              onChange();
-            }}
+            onClick={() => onPickVimm(job.id)}
             title="Try Vimm's Lair"
             aria-label="Try Vimm's Lair"
             className="flex h-10 w-10 items-center justify-center text-steam-muted transition hover:bg-white/10 hover:text-steam-bright"
@@ -364,19 +375,17 @@ function QueueRow({ job, onChange }: { job: Job; onChange: () => void }) {
  * (which honours `&so` and fetches just this file), copying the magnet to
  * handle it manually, or discarding the job.
  */
-function FallbackModal({ job, onChange }: { job: Job; onChange: () => void }) {
+function FallbackModal({
+  job,
+  onChange,
+  onPickVimm,
+}: {
+  job: Job;
+  onChange: () => void;
+  onPickVimm: () => void;
+}) {
   const [copied, setCopied] = useState(false);
-  const [vimmMsg, setVimmMsg] = useState("");
-  const [vimmBusy, setVimmBusy] = useState(false);
 
-  const useVimm = async () => {
-    setVimmBusy(true);
-    setVimmMsg("");
-    const res = await api(job.id, "POST", { action: "vimm" });
-    setVimmBusy(false);
-    if (res.ok) onChange();
-    else setVimmMsg("No match found on Vimm's Lair for this game/platform.");
-  };
   const useLocal = async () => {
     await api(job.id, "POST", { action: "local" });
     onChange();
@@ -409,7 +418,7 @@ function FallbackModal({ job, onChange }: { job: Job; onChange: () => void }) {
               ? "This torrent is dead"
               : `${providerLabel(job.debridProvider)} can't fetch this game`}
           </h2>
-          <p className="mt-0.5 truncate text-sm text-steam-muted">{job.title}</p>
+          <p className="mt-0.5 truncate text-sm text-steam-muted">{stripExt(job.title)}</p>
         </div>
 
         <div className="space-y-4 px-6 py-5">
@@ -431,15 +440,10 @@ function FallbackModal({ job, onChange }: { job: Job; onChange: () => void }) {
           )}
 
           <div className="flex flex-col gap-2">
-            <button
-              onClick={useVimm}
-              disabled={vimmBusy}
-              className="steam-btn-green w-full justify-center disabled:opacity-50"
-            >
+            <button onClick={onPickVimm} className="steam-btn-green w-full justify-center">
               <IconDownload className="h-4 w-4" />
-              {vimmBusy ? "Searching Vimm's Lair…" : "Try Vimm's Lair (direct download)"}
+              Try Vimm's Lair (choose a version)
             </button>
-            {vimmMsg && <p className="text-xs text-amber-300">{vimmMsg}</p>}
             {!deadTorrent && (
               <button onClick={useLocal} className="steam-btn w-full justify-center">
                 <IconDownload className="h-4 w-4" />
@@ -456,6 +460,107 @@ function FallbackModal({ job, onChange }: { job: Job; onChange: () => void }) {
               Discard
             </button>
           </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Lets the user choose which version of a game to grab from Vimm's Lair (the
+ * different regions/revisions), then downloads that one directly over HTTP.
+ */
+function VimmModal({
+  job,
+  onChange,
+  onClose,
+}: {
+  job: Job;
+  onChange: () => void;
+  onClose: () => void;
+}) {
+  const [cands, setCands] = useState<
+    { vaultId: string; title: string; region?: string; extras?: string[]; version?: string }[] | null
+  >(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    fetch(`/api/downloads/${job.id}/vimm`, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((d) => live && setCands(d.candidates ?? []))
+      .catch(() => live && setCands([]));
+    return () => {
+      live = false;
+    };
+  }, [job.id]);
+
+  const pick = async (vaultId: string) => {
+    setBusy(true);
+    await api(job.id, "POST", { action: "vimm", vaultId });
+    onChange();
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6 backdrop-blur-sm">
+      <div className="w-full max-w-lg border border-black/50 bg-steam-deep shadow-[0_12px_50px_rgba(0,0,0,0.7)]">
+        <div className="border-b border-steam-line px-6 py-4">
+          <h2 className="text-lg font-bold text-steam-bright">Choose a version on Vimm&apos;s Lair</h2>
+          <p className="mt-0.5 truncate text-sm text-steam-muted">{stripExt(job.title)}</p>
+        </div>
+
+        <div className="space-y-4 px-6 py-5">
+          <div className="max-h-72 overflow-y-auto border border-black/50 bg-black/20">
+            {cands === null ? (
+              <p className="flex items-center gap-2 px-3 py-3 text-xs text-steam-blue-light">
+                <Spinner className="h-3.5 w-3.5" /> Searching Vimm&apos;s Lair…
+              </p>
+            ) : cands.length === 0 ? (
+              <p className="px-3 py-3 text-xs text-steam-muted">
+                No match found on Vimm&apos;s Lair for this game/platform.
+              </p>
+            ) : (
+              cands.map((c) => (
+                <button
+                  key={c.vaultId}
+                  disabled={busy}
+                  onClick={() => pick(c.vaultId)}
+                  className="flex w-full items-center gap-2 border-b border-steam-line px-3 py-2 text-left text-xs text-steam-muted transition last:border-b-0 hover:bg-steam-blue/20 hover:text-steam-text disabled:opacity-50"
+                  title={[c.title, c.version && `v${c.version}`, ...(c.extras ?? [])]
+                    .filter(Boolean)
+                    .join(" · ")}
+                >
+                  <span className="truncate">{c.title}</span>
+                  {c.extras?.map((x) => (
+                    <span
+                      key={x}
+                      className="shrink-0 bg-amber-500/20 px-1.5 py-0.5 text-[10px] uppercase text-amber-300"
+                    >
+                      {x}
+                    </span>
+                  ))}
+                  {c.version && c.version !== "1.0" && (
+                    <span className="shrink-0 bg-black/40 px-1.5 py-0.5 text-[10px] text-steam-muted">
+                      v{c.version}
+                    </span>
+                  )}
+                  {c.region && (
+                    <span className="ml-auto shrink-0 bg-black/40 px-2 py-0.5 text-[10px] uppercase text-steam-blue-light">
+                      {c.region}
+                    </span>
+                  )}
+                </button>
+              ))
+            )}
+          </div>
+
+          <button
+            onClick={onClose}
+            className="w-full px-4 py-2 text-sm font-medium text-steam-muted transition hover:text-steam-text"
+          >
+            Cancel
+          </button>
         </div>
       </div>
     </div>
@@ -497,7 +602,7 @@ function MultiFileModal({ job, onChange }: { job: Job; onChange: () => void }) {
       <div className="w-full max-w-lg border border-black/50 bg-steam-deep shadow-[0_12px_50px_rgba(0,0,0,0.7)]">
         <div className="border-b border-steam-line px-6 py-4">
           <h2 className="text-lg font-bold text-steam-bright">This download has multiple files</h2>
-          <p className="mt-0.5 truncate text-sm text-steam-muted">{job.title}</p>
+          <p className="mt-0.5 truncate text-sm text-steam-muted">{stripExt(job.title)}</p>
         </div>
 
         <div className="space-y-4 px-6 py-5">
@@ -568,6 +673,7 @@ function SectionHeader({
 export default function DownloadsPage() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [vimmJobId, setVimmJobId] = useState<string | null>(null);
   const [stats, setStats] = useState<SpeedStats>(EMPTY_STATS);
   const trackRef = useRef<{
     id: string;
@@ -598,6 +704,7 @@ export default function DownloadsPage() {
   // First job awaiting the user's fallback choice drives the modal.
   const unavailable = jobs.find((j) => j.state === "unavailable");
   const multiFile = jobs.find((j) => j.state === "multi_file");
+  const vimmJob = vimmJobId ? jobs.find((j) => j.id === vimmJobId) : undefined;
 
   // Derive live download speed / peak / ETA from successive byte readings.
   useEffect(() => {
@@ -642,8 +749,19 @@ export default function DownloadsPage() {
 
   return (
     <div>
-      {unavailable && <FallbackModal job={unavailable} onChange={load} />}
-      {!unavailable && multiFile && <MultiFileModal job={multiFile} onChange={load} />}
+      {vimmJob && (
+        <VimmModal job={vimmJob} onChange={load} onClose={() => setVimmJobId(null)} />
+      )}
+      {!vimmJob && unavailable && (
+        <FallbackModal
+          job={unavailable}
+          onChange={load}
+          onPickVimm={() => setVimmJobId(unavailable.id)}
+        />
+      )}
+      {!vimmJob && !unavailable && multiFile && (
+        <MultiFileModal job={multiFile} onChange={load} />
+      )}
       {featured ? (
         <FeaturedDownload job={featured} stats={stats} onChange={load} />
       ) : (
@@ -667,7 +785,7 @@ export default function DownloadsPage() {
         ) : (
           <div>
             {queued.map((j) => (
-              <QueueRow key={j.id} job={j} onChange={load} />
+              <QueueRow key={j.id} job={j} onChange={load} onPickVimm={setVimmJobId} />
             ))}
           </div>
         )}
@@ -685,7 +803,7 @@ export default function DownloadsPage() {
             />
             <div>
               {history.map((j) => (
-                <QueueRow key={j.id} job={j} onChange={load} />
+                <QueueRow key={j.id} job={j} onChange={load} onPickVimm={setVimmJobId} />
               ))}
             </div>
           </div>
