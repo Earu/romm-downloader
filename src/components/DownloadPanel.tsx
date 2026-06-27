@@ -13,12 +13,32 @@ export interface RommPlatformOption {
   fsSlug: string;
 }
 
-interface MinervaResult {
-  fullPath: string;
+type SourceProviderId = "minerva" | "vimm" | "magnet";
+
+interface SourceResult {
+  provider: SourceProviderId;
+  transport: "torrent" | "http";
+  ref: string;
   fileName: string;
   platformSlug?: string;
   platformName?: string;
+  region?: string;
+  version?: string;
+  extras?: string[];
+  size?: number;
 }
+
+interface ProviderStatus {
+  id: SourceProviderId;
+  label: string;
+  status: "ok" | "error" | "not-synced" | "disabled" | "skipped";
+  error?: string;
+}
+
+const PROVIDER_LABEL: Record<string, string> = {
+  minerva: "Minerva",
+  vimm: "Vimm's Lair",
+};
 
 interface Props {
   game: { id: string; name: string; coverUrl?: string };
@@ -26,6 +46,8 @@ interface Props {
   rommPlatforms: RommPlatformOption[];
   /** Suggested fs_slug based on the game's IGDB platform data. */
   suggestedSlug?: string;
+  /** The game's official platforms (IGDB slugs) — search is scoped/filtered to these. */
+  platformSlugs: string[];
 }
 
 function filterPlatforms(query: string): KnownPlatform[] {
@@ -36,11 +58,11 @@ function filterPlatforms(query: string): KnownPlatform[] {
   );
 }
 
-export function DownloadPanel({ game, rommPlatforms, suggestedSlug }: Props) {
+export function DownloadPanel({ game, rommPlatforms, suggestedSlug, platformSlugs }: Props) {
   const router = useRouter();
   const [query, setQuery] = useState(game.name);
-  const [results, setResults] = useState<MinervaResult[]>([]);
-  const [selected, setSelected] = useState<MinervaResult | null>(null);
+  const [results, setResults] = useState<SourceResult[]>([]);
+  const [selected, setSelected] = useState<SourceResult | null>(null);
   const [searching, setSearching] = useState(false);
   const [notSynced, setNotSynced] = useState(false);
   const [searchError, setSearchError] = useState("");
@@ -77,7 +99,7 @@ export function DownloadPanel({ game, rommPlatforms, suggestedSlug }: Props) {
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  const runSearch = useCallback(async (q: string, all: boolean) => {
+  const runSearch = useCallback(async (q: string, all: boolean, platforms: string[]) => {
     if (q.trim().length < 3) {
       setResults([]);
       return;
@@ -85,26 +107,32 @@ export function DownloadPanel({ game, rommPlatforms, suggestedSlug }: Props) {
     setSearching(true);
     setSearchError("");
     try {
-      const res = await fetch(
-        `/api/minerva/search?q=${encodeURIComponent(q)}${all ? "&all=1" : ""}`,
-        { cache: "no-store" },
-      );
+      const params = new URLSearchParams({ q });
+      if (all) params.set("all", "1");
+      if (platforms.length) params.set("platforms", platforms.join(","));
+      const res = await fetch(`/api/sources/search?${params}`, { cache: "no-store" });
       const data = await res.json();
-      setNotSynced(Boolean(data.notSynced));
+      const providers: ProviderStatus[] = data.providers ?? [];
+      setNotSynced(providers.some((p) => p.id === "minerva" && p.status === "not-synced"));
       setResults(data.results ?? []);
-      if (data.error && !data.notSynced) setSearchError(data.error);
+      // Surface a non-fatal provider error (e.g. a Vimm hiccup) without hiding the
+      // other providers' results.
+      const errored = providers.find((p) => p.status === "error" && p.error);
+      setSearchError(errored ? `${errored.label}: ${errored.error}` : "");
     } finally {
       setSearching(false);
     }
   }, []);
 
   useEffect(() => {
+    // Search is scoped to the game's official platforms (Vimm searches each it
+    // covers; results on other platforms are dropped server-side).
     if (debounce.current) clearTimeout(debounce.current);
-    debounce.current = setTimeout(() => void runSearch(query, includeAll), 350);
+    debounce.current = setTimeout(() => void runSearch(query, includeAll, platformSlugs), 350);
     return () => {
       if (debounce.current) clearTimeout(debounce.current);
     };
-  }, [query, includeAll, runSearch]);
+  }, [query, includeAll, runSearch, platformSlugs]);
 
   const selectPlatform = (p: KnownPlatform) => {
     setSelectedPlatform(p);
@@ -113,9 +141,9 @@ export function DownloadPanel({ game, rommPlatforms, suggestedSlug }: Props) {
   };
 
   // Picking a ROM result auto-selects its inferred platform in the combobox.
-  const selectResult = (r: MinervaResult) => {
+  const selectResult = (r: SourceResult) => {
     setSelected(r);
-    setManualMagnet(""); // Minerva result and manual magnet are mutually exclusive
+    setManualMagnet(""); // a chosen result and a manual magnet are mutually exclusive
     if (r.platformSlug) {
       const p = KNOWN_PLATFORMS.find((kp) => kp.slug === r.platformSlug);
       if (p) {
@@ -142,9 +170,9 @@ export function DownloadPanel({ game, rommPlatforms, suggestedSlug }: Props) {
         catalogGameId: game.id,
         coverUrl: game.coverUrl,
         platformSlug,
+        sourceProvider: useMagnet ? "magnet" : selected!.provider,
+        sourceRef: useMagnet ? magnet : selected!.ref,
       };
-      if (useMagnet) body.magnet = magnet;
-      else body.minervaPath = selected!.fullPath;
       if (platformId != null) body.platformId = platformId;
 
       const res = await fetch("/api/downloads", {
@@ -173,7 +201,7 @@ export function DownloadPanel({ game, rommPlatforms, suggestedSlug }: Props) {
       <div>
         <div className="flex items-center justify-between">
           <label className="block text-xs font-medium uppercase tracking-wide text-steam-muted">
-            Find the ROM on Minerva
+            Find the ROM
           </label>
           <label className="flex cursor-pointer items-center gap-1.5 text-xs text-steam-muted">
             <input
@@ -212,25 +240,44 @@ export function DownloadPanel({ game, rommPlatforms, suggestedSlug }: Props) {
 
       {results.length > 0 && (
         <div className="max-h-64 overflow-y-auto border border-black/50 bg-black/20">
-          {results.map((r) => (
-            <button
-              key={r.fullPath}
-              onClick={() => selectResult(r)}
-              className={`flex w-full items-center gap-2 border-b border-steam-line px-3 py-2 text-left text-xs transition last:border-b-0 ${
-                selected?.fullPath === r.fullPath
-                  ? "bg-steam-blue/25 text-steam-bright"
-                  : "text-steam-muted hover:bg-white/[0.04] hover:text-steam-text"
-              }`}
-              title={r.fullPath}
-            >
-              <span className="truncate">{r.fileName}</span>
-              {r.platformName && (
-                <span className="ml-auto shrink-0 bg-black/40 px-2 py-0.5 text-[10px] text-steam-blue-light">
-                  {r.platformName}
+          {results.map((r) => {
+            const key = `${r.provider}:${r.ref}`;
+            const isSelected = selected != null && selected.provider === r.provider && selected.ref === r.ref;
+            return (
+              <button
+                key={key}
+                onClick={() => selectResult(r)}
+                className={`flex w-full items-center gap-2 border-b border-steam-line px-3 py-2 text-left text-xs transition last:border-b-0 ${
+                  isSelected
+                    ? "bg-steam-blue/25 text-steam-bright"
+                    : "text-steam-muted hover:bg-white/[0.04] hover:text-steam-text"
+                }`}
+                title={[r.fileName, ...(r.extras ?? []), r.version && `v${r.version}`]
+                  .filter(Boolean)
+                  .join(" · ")}
+              >
+                <span className="shrink-0 bg-steam-blue/15 px-1.5 py-0.5 text-[10px] font-medium uppercase text-steam-blue-light">
+                  {PROVIDER_LABEL[r.provider] ?? r.provider}
                 </span>
-              )}
-            </button>
-          ))}
+                <span className="shrink-0 bg-black/40 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-steam-muted">
+                  {r.transport === "http" ? "HTTP" : "Torrent"}
+                </span>
+                <span className="truncate">{r.fileName}</span>
+                {r.region && (
+                  <span className="ml-auto shrink-0 bg-black/40 px-1.5 py-0.5 text-[10px] uppercase text-steam-muted">
+                    {r.region}
+                  </span>
+                )}
+                {r.platformName && (
+                  <span
+                    className={`shrink-0 bg-black/40 px-2 py-0.5 text-[10px] text-steam-blue-light ${r.region ? "" : "ml-auto"}`}
+                  >
+                    {r.platformName}
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
       )}
 

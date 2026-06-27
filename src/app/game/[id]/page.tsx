@@ -103,6 +103,7 @@ export default async function GameDetailPage({
           game={{ id: game.id, name: game.name, coverUrl: game.coverUrl }}
           rommPlatforms={rommPlatforms}
           suggestedSlug={suggestedSlug}
+          platformSlugs={igdbSlugs}
         />
       </div>
     </div>

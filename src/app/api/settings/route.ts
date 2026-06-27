@@ -24,6 +24,7 @@ export async function GET() {
     igdbClientId: cfg.igdbClientId,
     igdbClientSecret: cfg.igdbClientSecret,
     downloadTmpDir: cfg.downloadTmpDir,
+    disabledSources: cfg.disabledSources,
   });
 }
 
@@ -36,6 +37,7 @@ const bodySchema = z.object({
   igdbClientId: z.string().optional(),
   igdbClientSecret: z.string().optional(),
   downloadTmpDir: z.string().optional(),
+  disabledSources: z.array(z.string()).optional(),
 });
 
 /**
@@ -63,6 +65,11 @@ export async function POST(req: Request) {
     igdbClientId: input.igdbClientId ?? existing?.igdbClientId ?? null,
     igdbClientSecret: keepSecret(input.igdbClientSecret, existing?.igdbClientSecret),
     downloadTmpDir: input.downloadTmpDir ?? existing?.downloadTmpDir ?? null,
+    // Persist as CSV; an explicit empty array saves "" (all sources enabled).
+    disabledSources:
+      input.disabledSources !== undefined
+        ? input.disabledSources.join(",")
+        : (existing?.disabledSources ?? null),
     updatedAt: new Date(),
   };
 

@@ -28,9 +28,19 @@ export interface AppConfig {
    * separate entries.
    */
   rommLibraryPath: string;
+  /** Source-provider ids the user has disabled (excluded from search). */
+  disabledSources: string[];
 }
 
 const DEFAULT_MAX_DEBRID_GB = 30;
+
+/** Parse a comma-separated list into trimmed, non-empty entries. */
+function parseCsv(value: string | null | undefined): string[] {
+  return (value ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
 
 function fromEnv(): AppConfig {
   return {
@@ -43,6 +53,7 @@ function fromEnv(): AppConfig {
     igdbClientSecret: process.env.IGDB_CLIENT_SECRET ?? "",
     downloadTmpDir: process.env.DOWNLOAD_TMP_DIR ?? "./data/downloads",
     rommLibraryPath: process.env.ROMM_LIBRARY_PATH ?? "",
+    disabledSources: parseCsv(process.env.DISABLED_SOURCES),
   };
 }
 
@@ -61,6 +72,10 @@ export async function getConfig(): Promise<AppConfig> {
       igdbClientSecret: row.igdbClientSecret || env.igdbClientSecret,
       downloadTmpDir: row.downloadTmpDir || env.downloadTmpDir,
       rommLibraryPath: env.rommLibraryPath,
+      // A saved row (even empty CSV) takes precedence so toggling all sources back
+      // on is honoured; only fall back to env when the column was never written.
+      disabledSources:
+        row.disabledSources != null ? parseCsv(row.disabledSources) : env.disabledSources,
     };
   } catch {
     // DB may not be migrated yet; fall back to env so /api/health still works.

@@ -23,6 +23,7 @@ interface SettingsView {
   igdbClientId: string;
   igdbClientSecret: string;
   downloadTmpDir: string;
+  disabledSources: string[];
 }
 
 const DEBRID_OPTIONS = [
@@ -31,6 +32,11 @@ const DEBRID_OPTIONS = [
   { id: "realdebrid", label: "Real-Debrid" },
   { id: "alldebrid", label: "AllDebrid" },
   { id: "premiumize", label: "Premiumize" },
+];
+// Mirrors SOURCE_PROVIDERS in lib/sources (kept inline — that module is server-only).
+const SOURCE_OPTIONS = [
+  { id: "minerva", label: "Minerva" },
+  { id: "vimm", label: "Vimm's Lair" },
 ];
 interface MinervaStatus {
   syncing: boolean;
@@ -104,6 +110,7 @@ export default function SettingsPage() {
   const [section, setSection] = useState<SectionId>("services");
   const [health, setHealth] = useState<Health | null>(null);
   const [form, setForm] = useState<Record<string, string>>({});
+  const [disabledSources, setDisabledSources] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [minerva, setMinerva] = useState<MinervaStatus | null>(null);
@@ -129,6 +136,7 @@ export default function SettingsPage() {
       igdbClientSecret: data.igdbClientSecret,
       downloadTmpDir: data.downloadTmpDir,
     });
+    setDisabledSources(data.disabledSources ?? []);
   }, []);
 
   const loadMinerva = useCallback(async () => {
@@ -154,9 +162,10 @@ export default function SettingsPage() {
       await fetch("/api/settings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(
-          Object.fromEntries(Object.entries(form).filter(([, v]) => v !== "")),
-        ),
+        body: JSON.stringify({
+          ...Object.fromEntries(Object.entries(form).filter(([, v]) => v !== "")),
+          disabledSources,
+        }),
       });
       await loadSettings();
       await loadHealth();
@@ -243,6 +252,27 @@ export default function SettingsPage() {
               Values here override environment variables. Leave secret fields blank to keep the
               current value (shown masked).
             </p>
+
+            <GroupTitle>ROM sources</GroupTitle>
+            <div className="space-y-1">
+              {SOURCE_OPTIONS.map((s) => {
+                const enabled = !disabledSources.includes(s.id);
+                return (
+                  <Row key={s.id} label={s.label} desc="Search this source when looking for a ROM.">
+                    <input
+                      type="checkbox"
+                      checked={enabled}
+                      onChange={(e) =>
+                        setDisabledSources((d) =>
+                          e.target.checked ? d.filter((id) => id !== s.id) : [...d, s.id],
+                        )
+                      }
+                      className="h-4 w-4 accent-steam-blue"
+                    />
+                  </Row>
+                );
+              })}
+            </div>
 
             <GroupTitle>Debrid provider</GroupTitle>
             <div className="space-y-1">

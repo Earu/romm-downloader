@@ -63,6 +63,7 @@ import {
 import type { DownloadJob } from "@/lib/db/schema";
 import { resolveMagnet } from "@/lib/minerva/client";
 import { toRommFsSlug } from "@/lib/platforms";
+import { getSourceProvider } from "@/lib/sources";
 import { RommClient } from "@/lib/romm/client";
 import {
   type VimmCandidate,
@@ -281,32 +282,52 @@ async function handleResolve(job: DownloadJob, hasDebrid: boolean): Promise<void
   // client (aria2); otherwise add to the debrid service first.
   const next = hasDebrid ? "adding" : "local_fetching";
 
-  // A user-supplied magnet (no Minerva path) needs no resolution. The exact
-  // file/size are unknown here — they're determined from the torrent during
-  // caching/fetching (largest-file pick).
-  if (!job.minervaPath) {
+  // A pasted magnet needs no resolution. The exact file/size are unknown here —
+  // they're determined from the torrent during caching/fetching (largest-file pick).
+  if (job.sourceProvider === "magnet") {
     if (!job.magnetOrHash) {
-      await failJob(job.id, "No Minerva path or magnet on job");
+      await failJob(job.id, "No magnet on job");
       return;
     }
     await updateJob(job.id, { state: next, progress: 0 });
     return;
   }
 
-  await updateJob(job.id, { state: "resolving" });
-  const resolved = await resolveMagnet(job.minervaPath);
-  const acquire = resolved.magnet ?? resolved.torrentUrl;
-  if (!acquire) {
-    await failJob(job.id, "Minerva entry has no magnet or torrent");
+  const provider = job.sourceProvider ? getSourceProvider(job.sourceProvider) : null;
+  if (!provider || !job.sourceRef) {
+    await failJob(job.id, `Job has no resolvable source (provider: ${job.sourceProvider ?? "none"})`);
     return;
   }
+
+  // Resolve the chosen source to a concrete download, then branch on how it's
+  // acquired: a torrent goes to debrid/the built-in client; an HTTP source
+  // (e.g. Vimm) streams directly.
+  await updateJob(job.id, { state: "resolving" });
+  const acq = await provider.resolve(job.sourceRef);
+
+  if (acq.kind === "http") {
+    // The real filename/extension is revealed by the response at fetch time; keep
+    // releaseName == uploadedFilename so it isn't treated as a collection archive.
+    await updateJob(job.id, {
+      state: "http_fetching",
+      title: acq.fileName,
+      sourceUrl: acq.url,
+      uploadedFilename: acq.fileName,
+      releaseName: acq.fileName,
+      bytesTotal: acq.size ?? null,
+      bytesDownloaded: null,
+      progress: 0,
+    });
+    return;
+  }
+
   await updateJob(job.id, {
     state: next,
-    releaseName: resolved.fileName,
-    magnetOrHash: acquire,
-    bytesTotal: resolved.size ?? null,
-    uploadedFilename: resolved.fileName,
-    minervaSoId: resolved.soId ?? null,
+    releaseName: acq.fileName,
+    magnetOrHash: acq.magnetOrHash,
+    bytesTotal: acq.size ?? null,
+    uploadedFilename: acq.fileName,
+    minervaSoId: acq.soId ?? null,
   });
 }
 

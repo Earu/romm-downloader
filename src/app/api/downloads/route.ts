@@ -11,21 +11,18 @@ export async function GET() {
   return NextResponse.json({ jobs });
 }
 
-const createSchema = z
-  .object({
-    // Source: a Minerva ROM path OR a directly-supplied magnet/.torrent URL.
-    minervaPath: z.string().min(1).optional(),
-    magnet: z.string().min(1).optional(),
-    title: z.string().min(1),
-    catalogGameId: z.string().optional(),
-    coverUrl: z.string().url().optional(),
-    // Either an existing RomM platform id, or omit to auto-create via platformSlug.
-    platformId: z.number().int().positive().optional(),
-    platformSlug: z.string().min(1),
-  })
-  .refine((d) => Boolean(d.minervaPath) || Boolean(d.magnet), {
-    message: "A minervaPath or magnet is required",
-  });
+const createSchema = z.object({
+  // Chosen source: which provider + its opaque reference (Minerva path / Vimm
+  // vault id / pasted magnet for the "magnet" pseudo-provider).
+  sourceProvider: z.enum(["minerva", "vimm", "magnet"]),
+  sourceRef: z.string().min(1),
+  title: z.string().min(1),
+  catalogGameId: z.string().optional(),
+  coverUrl: z.string().url().optional(),
+  // Either an existing RomM platform id, or omit to auto-create via platformSlug.
+  platformId: z.number().int().positive().optional(),
+  platformSlug: z.string().min(1),
+});
 
 /** Queue a new download job. The worker picks it up on its next tick. */
 export async function POST(req: Request) {
@@ -51,8 +48,8 @@ export async function POST(req: Request) {
   }
 
   const job = await createJob({
-    minervaPath: input.minervaPath,
-    magnet: input.magnet,
+    sourceProvider: input.sourceProvider,
+    sourceRef: input.sourceRef,
     title: input.title,
     catalogGameId: input.catalogGameId,
     coverUrl: input.coverUrl,
