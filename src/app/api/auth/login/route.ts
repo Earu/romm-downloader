@@ -5,7 +5,12 @@ import { createSession, SESSION_COOKIE, SESSION_MAX_AGE_S } from "@/lib/auth/ses
 import { normalizeBaseUrl } from "@/lib/config";
 import { db } from "@/lib/db";
 import { settings } from "@/lib/db/schema";
-import { rommProvisionToken, rommTokenValid, rommValidateLogin } from "@/lib/romm/auth";
+import {
+  rommProvisionToken,
+  rommTokenCanFirmware,
+  rommTokenValid,
+  rommValidateLogin,
+} from "@/lib/romm/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -39,6 +44,9 @@ export async function POST(req: Request) {
   let token =
     existing?.rommUrl === base && existing?.rommToken ? existing.rommToken : null;
   if (token && !(await rommTokenValid(base, token))) token = null;
+  // Re-provision tokens issued before firmware scopes were added, so firmware
+  // uploads don't 403 on an otherwise-valid older token.
+  if (token && !(await rommTokenCanFirmware(base, token))) token = null;
   if (!token) {
     try {
       token = await rommProvisionToken(base, username, password);

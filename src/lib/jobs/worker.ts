@@ -1,4 +1,5 @@
 import "server-only";
+import { runFirmwarePass } from "@/lib/firmware";
 import { syncIfStale } from "@/lib/minerva/sync";
 import { advanceJob } from "./orchestrator";
 import { failJob, getJob, listActiveJobs } from "./queue";
@@ -12,6 +13,9 @@ const POLL_MS = 4000;
 const STALL_MS = 15 * 60 * 1000;
 // How often to check whether the Minerva index needs its ~monthly refresh.
 const MINERVA_CHECK_MS = 12 * 60 * 60 * 1000;
+// How often to source + upload any missing BIOS/firmware to RomM (cheap when
+// nothing's missing; picks up newly-added platforms).
+const FIRMWARE_CHECK_MS = 30 * 60 * 1000;
 
 // Job states the worker advances. Others are terminal, transient, or parked
 // waiting for the user (unavailable / multi_file) — skip those so they don't
@@ -68,4 +72,9 @@ export function startWorker(): void {
   // syncIfStale is a no-op unless data is missing or older than the max age.
   void syncIfStale();
   setInterval(() => void syncIfStale(), MINERVA_CHECK_MS);
+
+  // Source + upload missing BIOS/firmware to RomM. Runs in the background (the
+  // one-time pack download doesn't block the job queue) and is idempotent.
+  void runFirmwarePass();
+  setInterval(() => void runFirmwarePass(), FIRMWARE_CHECK_MS);
 }

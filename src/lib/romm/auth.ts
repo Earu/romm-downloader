@@ -2,7 +2,7 @@ import "server-only";
 import { normalizeBaseUrl } from "@/lib/config";
 
 const TOKEN_NAME = "RomM Downloader";
-// Scopes the app needs: read/write ROMs + platforms + assets, run scan tasks.
+// Scopes the app needs: read/write ROMs + platforms + assets + firmware, run scans.
 const TOKEN_SCOPES = [
   "me.read",
   "roms.read",
@@ -11,6 +11,8 @@ const TOKEN_SCOPES = [
   "platforms.write",
   "assets.read",
   "assets.write",
+  "firmware.read",
+  "firmware.write",
   "tasks.run",
 ];
 
@@ -53,6 +55,23 @@ export async function rommTokenValid(baseUrl: string, token: string): Promise<bo
     cache: "no-store",
   });
   return res.ok;
+}
+
+/**
+ * Whether the token carries the firmware scope (added after some tokens were
+ * issued). Probes the firmware list endpoint, which requires `firmware.read`:
+ * 200 = has it, 403 = lacks it → the caller re-provisions to upgrade scopes.
+ */
+export async function rommTokenCanFirmware(baseUrl: string, token: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${normalizeBaseUrl(baseUrl)}/api/firmware`, {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: "no-store",
+    });
+    return res.ok; // 403 (scope missing) or any non-2xx → treat as "needs upgrade"
+  } catch {
+    return true; // network blip: don't force a needless re-provision
+  }
 }
 
 /**

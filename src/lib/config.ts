@@ -30,6 +30,8 @@ export interface AppConfig {
   rommLibraryPath: string;
   /** Source-provider ids the user has disabled (excluded from search). */
   disabledSources: string[];
+  /** Automatically source + upload BIOS/firmware to matching RomM platforms. */
+  firmwareAutoInstall: boolean;
 }
 
 const DEFAULT_MAX_DEBRID_GB = 30;
@@ -54,6 +56,7 @@ function fromEnv(): AppConfig {
     downloadTmpDir: process.env.DOWNLOAD_TMP_DIR ?? "./data/downloads",
     rommLibraryPath: process.env.ROMM_LIBRARY_PATH ?? "",
     disabledSources: parseCsv(process.env.DISABLED_SOURCES),
+    firmwareAutoInstall: process.env.FIRMWARE_AUTO_INSTALL !== "false",
   };
 }
 
@@ -76,6 +79,7 @@ export async function getConfig(): Promise<AppConfig> {
       // on is honoured; only fall back to env when the column was never written.
       disabledSources:
         row.disabledSources != null ? parseCsv(row.disabledSources) : env.disabledSources,
+      firmwareAutoInstall: row.firmwareAutoInstall ?? env.firmwareAutoInstall,
     };
   } catch {
     // DB may not be migrated yet; fall back to env so /api/health still works.

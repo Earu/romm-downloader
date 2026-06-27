@@ -97,6 +97,8 @@ export const settings = sqliteTable("settings", {
   downloadTmpDir: text("download_tmp_dir"),
   // CSV of source-provider ids the user has turned off; null/"" = all enabled.
   disabledSources: text("disabled_sources"),
+  // Auto-source + upload BIOS/firmware to RomM. null = use env default (on).
+  firmwareAutoInstall: integer("firmware_auto_install", { mode: "boolean" }),
   updatedAt: integer("updated_at", { mode: "timestamp_ms" })
     .notNull()
     .default(sql`(unixepoch() * 1000)`),
