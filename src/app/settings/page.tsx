@@ -2,7 +2,7 @@
 
 import type { SVGProps } from "react";
 import { useCallback, useEffect, useState } from "react";
-import { IconDatabase, IconLink, IconServer } from "@/components/icons";
+import { IconDatabase, IconDrive, IconLink, IconServer, Spinner } from "@/components/icons";
 
 interface ServiceHealth {
   configured: boolean;
@@ -24,6 +24,7 @@ interface SettingsView {
   igdbClientSecret: string;
   downloadTmpDir: string;
   disabledSources: string[];
+  firmwareAutoInstall: boolean;
 }
 
 const DEBRID_OPTIONS = [
@@ -49,7 +50,41 @@ interface MinervaStatus {
   stale: boolean;
 }
 
-type SectionId = "services" | "connections" | "index";
+interface FirmwareStatus {
+  sources: {
+    id: string;
+    label: string;
+    syncing: boolean;
+    progress?: number;
+    ready: boolean;
+    version?: string;
+    sizeBytes?: number;
+    syncedAt?: string;
+    stale: boolean;
+    error?: string;
+  }[];
+  installing?: boolean;
+  summary?: {
+    ranAt: string;
+    platforms: {
+      slug: string;
+      name: string;
+      state: "ok" | "unknown" | "ko";
+      present: number;
+      total: number;
+      needsFirmware: boolean;
+    }[];
+    error?: string;
+  };
+}
+
+const FW_STATE: Record<string, { label: string; cls: string }> = {
+  ok: { label: "OK", cls: "bg-steam-green-light/15 text-steam-green-light" },
+  unknown: { label: "Unknown", cls: "bg-amber-500/15 text-amber-300" },
+  ko: { label: "Missing", cls: "bg-red-500/15 text-red-400" },
+};
+
+type SectionId = "services" | "connections" | "index" | "firmware";
 
 const SECTIONS: {
   id: SectionId;
@@ -59,6 +94,7 @@ const SECTIONS: {
   { id: "services", Icon: IconServer, label: "Services" },
   { id: "connections", Icon: IconLink, label: "Connections" },
   { id: "index", Icon: IconDatabase, label: "ROM Index" },
+  { id: "firmware", Icon: IconDrive, label: "Firmware" },
 ];
 
 /** A label-left / control-right setting row (Steam settings list style). */
@@ -90,6 +126,27 @@ function GroupTitle({ children }: { children: React.ReactNode }) {
   );
 }
 
+/** Sliding on/off switch (the app's toggle convention). */
+function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      onClick={() => onChange(!checked)}
+      className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition ${
+        checked ? "bg-steam-blue" : "bg-black/50"
+      }`}
+    >
+      <span
+        className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition ${
+          checked ? "translate-x-4" : "translate-x-0.5"
+        }`}
+      />
+    </button>
+  );
+}
+
 function StatusBadge({ s }: { s: ServiceHealth }) {
   const color = !s.configured
     ? "text-steam-muted"
@@ -111,9 +168,12 @@ export default function SettingsPage() {
   const [health, setHealth] = useState<Health | null>(null);
   const [form, setForm] = useState<Record<string, string>>({});
   const [disabledSources, setDisabledSources] = useState<string[]>([]);
+  const [firmwareAutoInstall, setFirmwareAutoInstall] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [minerva, setMinerva] = useState<MinervaStatus | null>(null);
+  const [firmware, setFirmware] = useState<FirmwareStatus | null>(null);
+  const [firmwareBusy, setFirmwareBusy] = useState(false);
 
   const loadHealth = useCallback(async () => {
     setTesting(true);
@@ -137,11 +197,17 @@ export default function SettingsPage() {
       downloadTmpDir: data.downloadTmpDir,
     });
     setDisabledSources(data.disabledSources ?? []);
+    setFirmwareAutoInstall(data.firmwareAutoInstall ?? true);
   }, []);
 
   const loadMinerva = useCallback(async () => {
     const res = await fetch("/api/minerva/status", { cache: "no-store" });
     setMinerva(await res.json());
+  }, []);
+
+  const loadFirmware = useCallback(async () => {
+    const res = await fetch("/api/firmware/status", { cache: "no-store" });
+    setFirmware(await res.json());
   }, []);
 
   useEffect(() => {
@@ -156,6 +222,13 @@ export default function SettingsPage() {
     return () => clearInterval(t);
   }, [section, loadMinerva]);
 
+  useEffect(() => {
+    if (section !== "firmware") return;
+    void loadFirmware();
+    const t = setInterval(loadFirmware, 2000);
+    return () => clearInterval(t);
+  }, [section, loadFirmware]);
+
   const save = async () => {
     setSaving(true);
     try {
@@ -165,6 +238,7 @@ export default function SettingsPage() {
         body: JSON.stringify({
           ...Object.fromEntries(Object.entries(form).filter(([, v]) => v !== "")),
           disabledSources,
+          firmwareAutoInstall,
         }),
       });
       await loadSettings();
@@ -179,6 +253,18 @@ export default function SettingsPage() {
     void loadMinerva();
   };
 
+  const syncFirmware = async () => {
+    // Optimistic feedback: show "working" immediately, then let the server's
+    // `installing` flag (and any source download progress) carry it from there.
+    setFirmwareBusy(true);
+    try {
+      await fetch("/api/firmware/status", { method: "POST" });
+      await loadFirmware();
+    } finally {
+      setFirmwareBusy(false);
+    }
+  };
+
   const input = (key: string, placeholder = "", type = "text") => (
     <input
       type={type}
@@ -191,6 +277,11 @@ export default function SettingsPage() {
 
   const gb = (b?: number) => (b ? `${(b / 1e9).toFixed(2)} GB` : "—");
   const when = (iso?: string) => (iso ? new Date(iso).toLocaleString() : "never");
+
+  // Firmware "is something happening" state: optimistic local flag OR a running
+  // install pass OR a source still downloading its pack.
+  const fwDownloading = firmware?.sources.some((s) => s.syncing) ?? false;
+  const fwWorking = firmwareBusy || (firmware?.installing ?? false) || fwDownloading;
 
   return (
     <div className="grid min-h-[calc(100vh-56px)] grid-cols-[240px_1fr]">
@@ -259,15 +350,13 @@ export default function SettingsPage() {
                 const enabled = !disabledSources.includes(s.id);
                 return (
                   <Row key={s.id} label={s.label} desc="Search this source when looking for a ROM.">
-                    <input
-                      type="checkbox"
+                    <Toggle
                       checked={enabled}
-                      onChange={(e) =>
+                      onChange={(on) =>
                         setDisabledSources((d) =>
-                          e.target.checked ? d.filter((id) => id !== s.id) : [...d, s.id],
+                          on ? d.filter((id) => id !== s.id) : [...d, s.id],
                         )
                       }
-                      className="h-4 w-4 accent-steam-blue"
                     />
                   </Row>
                 );
@@ -375,6 +464,119 @@ export default function SettingsPage() {
               </p>
             )}
             {minerva?.error && <p className="mt-3 text-xs text-red-400">{minerva.error}</p>}
+          </div>
+        )}
+
+        {section === "firmware" && (
+          <div>
+            <div className="mb-4 flex items-center justify-between">
+              <h1 className="text-xl font-bold text-steam-bright">Firmware &amp; BIOS</h1>
+              <button onClick={syncFirmware} disabled={fwWorking} className="steam-btn">
+                {fwWorking ? (
+                  <span className="flex items-center gap-2">
+                    <Spinner className="h-3.5 w-3.5" />
+                    Working…
+                  </span>
+                ) : (
+                  "Sync & install now"
+                )}
+              </button>
+            </div>
+            <p className="mb-4 text-xs text-steam-muted">
+              Verified BIOS via RetroBIOS, uploaded to matching RomM platforms. Switch keys
+              aren&apos;t included.
+            </p>
+
+            {fwWorking && (
+              <div className="mb-4 flex items-center gap-2 bg-steam-row px-4 py-3 text-xs text-steam-blue-light">
+                <Spinner className="h-3.5 w-3.5" />
+                {fwDownloading ? "Downloading firmware…" : "Installing firmware to RomM…"}
+              </div>
+            )}
+
+            <div className="space-y-1">
+              <Row
+                label="Auto-install firmware"
+                desc="Upload missing BIOS to RomM platforms automatically."
+              >
+                <Toggle
+                  checked={firmwareAutoInstall}
+                  onChange={(v) => {
+                    setFirmwareAutoInstall(v);
+                    void fetch("/api/settings", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ firmwareAutoInstall: v }),
+                    });
+                  }}
+                />
+              </Row>
+            </div>
+
+            {firmware?.sources.map((s) => (
+              <div key={s.id} className="mt-8">
+                <GroupTitle>{s.label}</GroupTitle>
+                {s.syncing && (
+                  <div className="mb-3 bg-steam-row p-4">
+                    <p className="mb-2 text-xs uppercase tracking-wide text-steam-blue-light">
+                      Downloading pack… {s.progress ?? 0}%
+                    </p>
+                    <div className="h-1.5 w-full overflow-hidden bg-black/50">
+                      <div
+                        className="h-full bg-steam-blue transition-all"
+                        style={{ width: `${s.progress ?? 0}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+                <div className="space-y-1">
+                  <Row label="Pack status">
+                    <span className="text-sm text-steam-text">
+                      {s.syncing ? "Downloading…" : s.ready ? "Ready" : "Not downloaded"}
+                    </span>
+                  </Row>
+                  <Row label="Version">
+                    <span className="text-sm text-steam-text">{s.version ?? "—"}</span>
+                  </Row>
+                  <Row label="Size">
+                    <span className="text-sm text-steam-text">{gb(s.sizeBytes)}</span>
+                  </Row>
+                  <Row label="Last synced">
+                    <span className="text-sm text-steam-text">{when(s.syncedAt)}</span>
+                  </Row>
+                </div>
+                {s.error && <p className="mt-2 text-xs text-red-400">{s.error}</p>}
+              </div>
+            ))}
+
+            {firmware?.summary && firmware.summary.platforms.length > 0 && (
+              <>
+                <GroupTitle>Platforms ({when(firmware.summary.ranAt)})</GroupTitle>
+                <div className="space-y-1">
+                  {firmware.summary.platforms.map((p, i) => {
+                    const detail =
+                      p.total > 0
+                        ? `${p.present}/${p.total} present`
+                        : p.needsFirmware
+                          ? "firmware required"
+                          : "no firmware needed";
+                    const st = FW_STATE[p.state] ?? FW_STATE.ok;
+                    return (
+                      <Row key={`${p.slug}-${i}`} label={p.name} desc={detail}>
+                        <span
+                          className={`px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide ${st.cls}`}
+                        >
+                          {st.label}
+                        </span>
+                      </Row>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+            {firmware?.summary?.error && (
+              <p className="mt-3 text-xs text-red-400">{firmware.summary.error}</p>
+            )}
           </div>
         )}
       </div>

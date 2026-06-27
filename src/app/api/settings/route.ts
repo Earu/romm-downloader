@@ -25,6 +25,7 @@ export async function GET() {
     igdbClientSecret: cfg.igdbClientSecret,
     downloadTmpDir: cfg.downloadTmpDir,
     disabledSources: cfg.disabledSources,
+    firmwareAutoInstall: cfg.firmwareAutoInstall,
   });
 }
 
@@ -38,6 +39,7 @@ const bodySchema = z.object({
   igdbClientSecret: z.string().optional(),
   downloadTmpDir: z.string().optional(),
   disabledSources: z.array(z.string()).optional(),
+  firmwareAutoInstall: z.boolean().optional(),
 });
 
 /**
@@ -70,6 +72,8 @@ export async function POST(req: Request) {
       input.disabledSources !== undefined
         ? input.disabledSources.join(",")
         : (existing?.disabledSources ?? null),
+    firmwareAutoInstall:
+      input.firmwareAutoInstall ?? existing?.firmwareAutoInstall ?? null,
     updatedAt: new Date(),
   };
 

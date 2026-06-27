@@ -30,6 +30,18 @@ export interface RommRom {
   igdb_id?: number | null;
 }
 
+/** Subset of RomM's firmware (BIOS) schema we use. */
+export interface RommFirmware {
+  id: number;
+  file_name: string;
+  file_size_bytes?: number;
+  is_verified?: boolean;
+  crc_hash?: string;
+  md5_hash?: string;
+  sha1_hash?: string;
+  missing_from_fs?: boolean;
+}
+
 export interface RommHeartbeat {
   SYSTEM: { VERSION: string; SHOW_SETUP_WIZARD: boolean };
   METADATA_SOURCES: Record<string, boolean>;
@@ -128,6 +140,33 @@ export class RommClient {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ fs_slug: fsSlug }),
     });
+  }
+
+  /** List a platform's firmware (BIOS) files. Needs the `firmware.read` scope. */
+  async listFirmware(platformId: number): Promise<RommFirmware[]> {
+    const res = await this.req<{ items?: RommFirmware[] } | RommFirmware[]>(
+      `/firmware?platform_id=${platformId}`,
+    );
+    return Array.isArray(res) ? res : (res.items ?? []);
+  }
+
+  /**
+   * Upload BIOS/firmware files into a platform's `bios/<slug>/` folder via RomM's
+   * multipart endpoint (field `files`, multiple per request). RomM hash-verifies
+   * each against its known-BIOS DB. Needs the `firmware.write` scope.
+   */
+  async uploadFirmware(
+    platformId: number,
+    files: { name: string; data: Uint8Array }[],
+  ): Promise<void> {
+    const form = new FormData();
+    for (const f of files) {
+      // Cast: a Uint8Array is a valid Blob part at runtime; the DOM lib's
+      // BlobPart type is narrower than the generic Uint8Array<ArrayBufferLike>.
+      form.append("files", new Blob([f.data as BlobPart]), f.name);
+    }
+    // No Content-Type — fetch derives the multipart boundary from the FormData body.
+    await this.req(`/firmware?platform_id=${platformId}`, { method: "POST", body: form });
   }
 
   /** List all ROMs in the library (the installed games). */

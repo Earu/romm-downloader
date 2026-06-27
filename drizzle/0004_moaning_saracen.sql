@@ -1,0 +1,1 @@
+ALTER TABLE `settings` ADD `firmware_auto_install` integer;
