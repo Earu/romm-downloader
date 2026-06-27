@@ -65,14 +65,16 @@ function fileGood(rf: RommFirmware, pf: FirmwareFile): boolean {
 const STATE_ORDER: Record<FirmwarePlatformState, number> = { ko: 0, unknown: 1, ok: 2 };
 
 /**
- * Keep only real RomM platforms: drop ones RomM didn't recognise (created from a
- * bad/untranslated fs_slug — these have no resolved logo, e.g. a bare "Gc"/"Ps"),
- * and collapse duplicates that share an fs_slug (keep the one with the most ROMs).
+ * Keep only the platforms RomM itself surfaces: recognised (RomM resolved a logo;
+ * a bad/untranslated fs_slug yields a bare logo-less "Gc"/"Ps"), holding at least
+ * one ROM (RomM hides empty platforms — so firmware follows your games), deduped
+ * by fs_slug (most ROMs wins).
  */
 function realPlatforms(platforms: RommPlatform[]): RommPlatform[] {
   const bySlug = new Map<string, RommPlatform>();
   for (const p of platforms) {
     if (!p.url_logo) continue; // RomM couldn't match it → not a real platform
+    if ((p.rom_count ?? 0) === 0) continue; // RomM hides platforms with no ROMs
     const existing = bySlug.get(p.fs_slug);
     if (!existing || (p.rom_count ?? 0) > (existing.rom_count ?? 0)) bySlug.set(p.fs_slug, p);
   }
