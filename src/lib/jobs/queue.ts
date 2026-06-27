@@ -3,15 +3,16 @@ import { randomUUID } from "node:crypto";
 import { desc, eq, notInArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { type DownloadJob, downloadJobs, type JobState } from "@/lib/db/schema";
+import type { SourceProviderId } from "@/lib/sources";
 import { clearDeadTorrent, torrentIdentity } from "./dead-torrents";
 
 const TERMINAL: JobState[] = ["done", "failed"];
 
 export interface CreateJobInput {
-  /** Minerva ROM path (resolved to a magnet), OR... */
-  minervaPath?: string;
-  /** ...a magnet/.torrent URL supplied directly by the user. */
-  magnet?: string;
+  /** Where the ROM was chosen from. */
+  sourceProvider: SourceProviderId;
+  /** Provider-specific reference: Minerva path / Vimm vault id / pasted magnet. */
+  sourceRef: string;
   title: string;
   catalogGameId?: string;
   coverUrl?: string;
@@ -20,21 +21,30 @@ export interface CreateJobInput {
 }
 
 export async function createJob(input: CreateJobInput): Promise<DownloadJob> {
+  const { sourceProvider, sourceRef } = input;
+
+  // Seed the working fields the existing pipeline reads: Minerva resolves its path
+  // to a magnet later (keep `minervaPath` so handleLocalFetching can re-fetch the
+  // .torrent for working trackers); a pasted magnet is the magnet itself; Vimm is
+  // resolved to a URL during the resolve step.
+  const minervaPath = sourceProvider === "minerva" ? sourceRef : null;
+  const magnetOrHash = sourceProvider === "magnet" ? sourceRef : null;
+
   // A user pasting a magnet is an explicit "try this" — trust their judgement and
   // forget any prior dead-swarm record for it, so it's attempted again (and only
   // re-recorded if it's still dead).
-  if (input.magnet) {
-    const identity = torrentIdentity({ magnetOrHash: input.magnet });
+  if (magnetOrHash) {
+    const identity = torrentIdentity({ magnetOrHash });
     if (identity) await clearDeadTorrent(identity);
   }
 
   const id = randomUUID();
   await db.insert(downloadJobs).values({
     id,
-    minervaPath: input.minervaPath ?? null,
-    // A manually-provided magnet is stored up front; the resolve step skips
-    // Minerva lookup for these.
-    magnetOrHash: input.magnet ?? null,
+    sourceProvider,
+    sourceRef,
+    minervaPath,
+    magnetOrHash,
     catalogGameId: input.catalogGameId ?? null,
     title: input.title,
     coverUrl: input.coverUrl ?? null,

@@ -40,7 +40,11 @@ export const downloadJobs = sqliteTable("download_jobs", {
   debridProvider: text("debrid_provider"), // which debrid service handled this job
   debridId: text("debrid_id"), // provider transfer id
   debridFileId: text("debrid_file_id"), // chosen file id within the transfer
-  // Direct HTTP source (e.g. Vimm's Lair fallback) — streamed locally as-is.
+  // Chosen source (provider-agnostic): which catalog the ROM came from and its
+  // provider-specific reference (Minerva path / Vimm vault id / pasted magnet).
+  sourceProvider: text("source_provider"), // "minerva" | "vimm" | "magnet"
+  sourceRef: text("source_ref"),
+  // Direct HTTP source (e.g. Vimm's Lair) — streamed locally as-is.
   sourceUrl: text("source_url"),
   // Progress / status
   state: text("state").$type<JobState>().notNull().default("requested"),
@@ -91,6 +95,8 @@ export const settings = sqliteTable("settings", {
   igdbClientId: text("igdb_client_id"),
   igdbClientSecret: text("igdb_client_secret"),
   downloadTmpDir: text("download_tmp_dir"),
+  // CSV of source-provider ids the user has turned off; null/"" = all enabled.
+  disabledSources: text("disabled_sources"),
   updatedAt: integer("updated_at", { mode: "timestamp_ms" })
     .notNull()
     .default(sql`(unixepoch() * 1000)`),
