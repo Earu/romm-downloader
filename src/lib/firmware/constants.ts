@@ -20,5 +20,17 @@ export const PS3_UPDATELIST_URL =
 export const PS3_PUP_PATH = join(FIRMWARE_DIR, "PS3UPDAT.PUP");
 export const PS3_META_PATH = join(FIRMWARE_DIR, "ps3.json");
 
+/** Switch system firmware (NX_Firmware) — per-version GitHub releases of the
+ *  firmware, plus the repo's prod.keys (the master keys are identical across all
+ *  retail consoles; needed by Ryujinx/Yuzu alongside the firmware). */
+export const NX_RELEASES_API = "https://api.github.com/repos/THZoria/NX_Firmware/releases/latest";
+export const NX_FIRMWARE_ASSET_RE = /^firmware[._].*\.zip$/i;
+export const NX_PRODKEYS_API =
+  "https://api.github.com/repos/THZoria/NX_Firmware/contents/prod.keys";
+export const SWITCH_DIR = join(FIRMWARE_DIR, "switch");
+export const SWITCH_FW_PATH = join(SWITCH_DIR, "firmware.zip");
+export const SWITCH_KEYS_PATH = join(SWITCH_DIR, "prod.keys");
+export const SWITCH_META_PATH = join(FIRMWARE_DIR, "switch.json");
+
 /** Re-check the upstream release if the cache is older than this. */
 export const FIRMWARE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // ~1 month

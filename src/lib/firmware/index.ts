@@ -7,6 +7,7 @@ import { type RommFirmware, type RommPlatform, RommClient } from "@/lib/romm/cli
 import { FIRMWARE_DIR } from "./constants";
 import { ps3Source } from "./ps3";
 import { retrobiosSource } from "./retrobios";
+import { switchSource } from "./switch";
 import type {
   FirmwareFile,
   FirmwareInstallSummary,
@@ -18,7 +19,7 @@ import type {
 export * from "./types";
 
 /** Registered firmware sources, in priority order. Add new ones (e.g. Switch) here. */
-const REGISTRY: FirmwareSource[] = [retrobiosSource, ps3Source];
+const REGISTRY: FirmwareSource[] = [retrobiosSource, ps3Source, switchSource];
 
 const SUMMARY_PATH = join(FIRMWARE_DIR, "install-summary.json");
 // Upload files in size-bounded batches so a big set (e.g. ~70 PS2 BIOS) doesn't
