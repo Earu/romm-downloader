@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { IconCheck } from "@/components/icons";
+import { IconCheck, IconServer } from "@/components/icons";
 import { UninstallButton } from "@/components/UninstallButton";
 import { getRommClient } from "@/lib/clients";
+import { getConfig } from "@/lib/config";
 import { type InstalledRom, toInstalledRom } from "@/lib/romm/installed";
 
 export const dynamic = "force-dynamic";
@@ -23,6 +24,8 @@ export default async function RomDetailPage({ params }: { params: Promise<{ id: 
   } catch {
     notFound();
   }
+  const { rommUrl: rommBase } = await getConfig();
+  const rommRomUrl = `${rommBase.replace(/\/+$/, "")}/rom/${rom.id}`;
 
   return (
     <div className="grid gap-7 px-8 py-7 md:grid-cols-[230px_1fr]">
@@ -69,7 +72,15 @@ export default async function RomDetailPage({ params }: { params: Promise<{ id: 
           <dd className="text-steam-text">{fmtSize(rom.sizeBytes)}</dd>
         </dl>
 
-        <div className="border-t border-steam-line pt-5">
+        <div className="flex flex-wrap items-center gap-3 border-t border-steam-line pt-5">
+          <a
+            href={rommRomUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="steam-btn-green inline-flex items-center gap-2 px-4 py-2"
+          >
+            <IconServer className="h-4 w-4" /> View in RomM
+          </a>
           <UninstallButton romId={rom.id} name={rom.name} />
         </div>
       </div>
