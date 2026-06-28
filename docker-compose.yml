@@ -3,7 +3,7 @@
 # client token), so no ROMM_TOKEN is needed.
 #
 #   cp .env.example .env   # fill in AUTH_SECRET, DEBRID_*, IGDB_*, ROMM_URL
-#   docker compose -f docker-compose.example.yml up -d --build
+#   docker compose up -d
 #
 # To group multi-file releases (e.g. a Switch base game + updates + DLC) into a
 # SINGLE RomM entry, the app must share RomM's library on disk — see the

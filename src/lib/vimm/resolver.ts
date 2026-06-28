@@ -1,5 +1,7 @@
 import "server-only";
 
+import { fetchWithRetry } from "@/lib/http/retry";
+
 /**
  * Vimm's Lair resolver — a reliable per-game HTTP download source, used as a
  * fallback when a Minerva torrent is dead. Given a game title + RomM platform
@@ -179,7 +181,11 @@ function scoreCandidate(c: Candidate, query: string): number {
 
 async function fetchText(url: string): Promise<string | null> {
   try {
-    const res = await fetch(url, { headers: vimmHeaders(), cache: "no-store" });
+    const res = await fetchWithRetry(
+      url,
+      { headers: vimmHeaders(), cache: "no-store" },
+      { label: "vimm" },
+    );
     if (!res.ok) return null;
     return await res.text();
   } catch {

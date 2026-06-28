@@ -2,6 +2,7 @@ import "server-only";
 import { createWriteStream } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
+import { fetchWithRetry } from "@/lib/http/retry";
 
 /** Pull the server-suggested filename out of a Content-Disposition header. */
 function filenameFromDisposition(cd: string | null): string | null {
@@ -32,7 +33,7 @@ export async function streamUrlToFile(
   headers?: Record<string, string>,
 ): Promise<{ bytes: number; filename: string | null }> {
   await mkdir(dirname(destPath), { recursive: true });
-  const res = await fetch(url, { cache: "no-store", headers });
+  const res = await fetchWithRetry(url, { cache: "no-store", headers }, { label: "download" });
   if (!res.ok || !res.body) {
     throw new Error(`download failed: HTTP ${res.status}`);
   }
