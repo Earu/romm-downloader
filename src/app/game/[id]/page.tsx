@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { DownloadPanel, type RommPlatformOption } from "@/components/DownloadPanel";
+import { InstallTracker } from "@/components/InstallTracker";
 import { getCatalogProvider } from "@/lib/catalog";
 import { getRommClient } from "@/lib/clients";
 import { PLATFORM_BY_SLUG, toRommFsSlug } from "@/lib/platforms";
@@ -27,12 +28,13 @@ export default async function GameDetailPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ info?: string }>;
+  searchParams: Promise<{ info?: string; job?: string }>;
 }) {
   const { id } = await params;
   // `?info=1` (e.g. opened from a download's cover) makes this a read-only info
-  // page — no source search, no download controls.
-  const { info } = await searchParams;
+  // page — no source search, no download controls. A `job` id, when present,
+  // tracks that download and links to the installed game on RomM once it's done.
+  const { info, job: jobId } = await searchParams;
   const infoOnly = info === "1";
   const provider = await getCatalogProvider();
   if (!provider.isEnabled()) {
@@ -105,14 +107,16 @@ export default async function GameDetailPage({
           ))}
         </div>
 
-        {!infoOnly && (
-          <DownloadPanel
-            game={{ id: game.id, name: game.name, coverUrl: game.coverUrl }}
-            rommPlatforms={rommPlatforms}
-            suggestedSlug={suggestedSlug}
-            platformSlugs={igdbSlugs}
-          />
-        )}
+        {infoOnly
+          ? jobId && <InstallTracker jobId={jobId} />
+          : (
+            <DownloadPanel
+              game={{ id: game.id, name: game.name, coverUrl: game.coverUrl }}
+              rommPlatforms={rommPlatforms}
+              suggestedSlug={suggestedSlug}
+              platformSlugs={igdbSlugs}
+            />
+          )}
       </div>
     </div>
   );
