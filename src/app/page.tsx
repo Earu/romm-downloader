@@ -159,6 +159,7 @@ export default function CatalogPage() {
                           name={g.name}
                           coverUrl={g.coverUrl}
                           subtitle={g.releaseYear ? String(g.releaseYear) : undefined}
+                          platforms={g.platforms}
                           installed={!!rom}
                         />
                       );

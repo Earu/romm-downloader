@@ -1,16 +1,19 @@
 import Link from "next/link";
 import { IconCheck } from "@/components/icons";
+import { PlatformBadges } from "@/components/PlatformBadges";
 
 interface GameCardProps {
   href: string;
   name: string;
   coverUrl?: string;
   subtitle?: string;
+  /** Platforms the game released on — shown as badges under the subtitle. */
+  platforms?: { name: string; slug?: string }[];
   /** Show a checkmark badge — the game is installed in RomM. */
   installed?: boolean;
 }
 
-export function GameCard({ href, name, coverUrl, subtitle, installed }: GameCardProps) {
+export function GameCard({ href, name, coverUrl, subtitle, platforms, installed }: GameCardProps) {
   return (
     <Link
       href={href}
@@ -40,6 +43,7 @@ export function GameCard({ href, name, coverUrl, subtitle, installed }: GameCard
           {name}
         </p>
         <p className="text-xs font-medium text-steam-muted">{subtitle ?? "—"}</p>
+        {platforms && platforms.length > 0 && <PlatformBadges platforms={platforms} />}
       </div>
     </Link>
   );

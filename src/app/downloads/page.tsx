@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import type { SVGProps } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -15,6 +16,7 @@ interface Job {
   id: string;
   title: string;
   coverUrl: string | null;
+  catalogGameId: string | null;
   targetPlatformSlug: string;
   releaseName: string | null;
   magnetOrHash: string | null;
@@ -68,6 +70,11 @@ const ACTIVE_STATES = new Set([
   "http_fetching",
   "uploading",
 ]);
+
+// States where bytes are actively transferring, so a live ETA is meaningful —
+// debrid (fetching), built-in torrent client (local_fetching), and Vimm/HTTP
+// (http_fetching) alike.
+const DOWNLOADING_STATES = new Set(["fetching", "local_fetching", "http_fetching"]);
 
 interface SpeedStats {
   speed: number; // bytes/sec
@@ -178,6 +185,24 @@ function Bar({ pct, color }: { pct: number; color: "blue" | "green" }) {
   );
 }
 
+/** Job cover art. Links to the game's catalog page when the job carries a
+ *  catalog id (covers from pasted magnets have none, so stay non-clickable). */
+function Cover({ job }: { job: Job }) {
+  if (!job.coverUrl) return null;
+  // eslint-disable-next-line @next/next/no-img-element
+  const img = <img src={job.coverUrl} alt="" className="h-full w-full object-cover" />;
+  if (!job.catalogGameId) return img;
+  return (
+    <Link
+      href={`/game/${job.catalogGameId}?info=1`}
+      title="View game"
+      className="block h-full w-full cursor-pointer transition hover:opacity-80"
+    >
+      {img}
+    </Link>
+  );
+}
+
 function FeaturedDownload({
   job,
   stats,
@@ -208,10 +233,7 @@ function FeaturedDownload({
         {/* Cover + title */}
         <div className="flex min-w-0 flex-1 items-end gap-4">
           <div className="h-28 w-20 shrink-0 overflow-hidden bg-black/50 shadow-[0_2px_8px_rgba(0,0,0,0.6)]">
-            {job.coverUrl && (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={job.coverUrl} alt="" className="h-full w-full object-cover" />
-            )}
+            <Cover job={job} />
           </div>
           <div className="min-w-0 pb-1">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-steam-blue-light">
@@ -257,7 +279,7 @@ function FeaturedDownload({
 
           <div className="mt-3 flex items-center justify-between">
             <span className="text-xs text-steam-muted">
-              {stats.etaSec != null && job.state === "fetching"
+              {stats.etaSec != null && DOWNLOADING_STATES.has(job.state)
                 ? `Estimated ${fmtEta(stats.etaSec)} remaining`
                 : " "}
             </span>
@@ -310,10 +332,7 @@ function QueueRow({
   return (
     <div className="group flex items-center gap-4 border-b border-steam-line px-2 py-3 transition hover:bg-white/[0.03]">
       <div className="h-16 w-12 shrink-0 overflow-hidden bg-black/50">
-        {job.coverUrl && (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={job.coverUrl} alt="" className="h-full w-full object-cover" />
-        )}
+        <Cover job={job} />
       </div>
       <div className="min-w-0 flex-1">
         <p className="truncate text-base font-bold text-steam-bright">{stripExt(job.title)}</p>

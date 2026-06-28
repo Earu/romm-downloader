@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { IconPlay, Spinner } from "@/components/icons";
+import { formatBytes } from "@/lib/format";
 import { KNOWN_PLATFORMS, type KnownPlatform, toRommFsSlug } from "@/lib/platforms";
 
 export interface RommPlatformOption {
@@ -263,14 +264,21 @@ export function DownloadPanel({ game, rommPlatforms, suggestedSlug, platformSlug
                   {r.transport === "http" ? "HTTP" : "Torrent"}
                 </span>
                 <span className="truncate">{r.fileName}</span>
+                {r.size != null && (
+                  <span className="ml-auto shrink-0 bg-black/40 px-1.5 py-0.5 text-[10px] tabular-nums text-steam-muted">
+                    {formatBytes(r.size)}
+                  </span>
+                )}
                 {r.region && (
-                  <span className="ml-auto shrink-0 bg-black/40 px-1.5 py-0.5 text-[10px] uppercase text-steam-muted">
+                  <span
+                    className={`shrink-0 bg-black/40 px-1.5 py-0.5 text-[10px] uppercase text-steam-muted ${r.size == null ? "ml-auto" : ""}`}
+                  >
                     {r.region}
                   </span>
                 )}
                 {r.platformName && (
                   <span
-                    className={`shrink-0 bg-black/40 px-2 py-0.5 text-[10px] text-steam-blue-light ${r.region ? "" : "ml-auto"}`}
+                    className={`shrink-0 bg-black/40 px-2 py-0.5 text-[10px] text-steam-blue-light ${r.size == null && !r.region ? "ml-auto" : ""}`}
                   >
                     {r.platformName}
                   </span>
