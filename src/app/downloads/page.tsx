@@ -194,7 +194,7 @@ function Cover({ job }: { job: Job }) {
   if (!job.catalogGameId) return img;
   return (
     <Link
-      href={`/game/${job.catalogGameId}?info=1`}
+      href={`/game/${job.catalogGameId}?info=1&job=${job.id}`}
       title="View game"
       className="block h-full w-full cursor-pointer transition hover:opacity-80"
     >
