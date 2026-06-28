@@ -442,7 +442,7 @@ function FallbackModal({
           <div className="flex flex-col gap-2">
             <button onClick={onPickVimm} className="steam-btn-green w-full justify-center">
               <IconDownload className="h-4 w-4" />
-              Try Vimm's Lair (choose a version)
+              Try Vimm&apos;s Lair (choose a version)
             </button>
             {!deadTorrent && (
               <button onClick={useLocal} className="steam-btn w-full justify-center">
