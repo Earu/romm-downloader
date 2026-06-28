@@ -24,10 +24,16 @@ async function loadRommPlatforms(): Promise<RommPlatformOption[]> {
 
 export default async function GameDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ info?: string }>;
 }) {
   const { id } = await params;
+  // `?info=1` (e.g. opened from a download's cover) makes this a read-only info
+  // page — no source search, no download controls.
+  const { info } = await searchParams;
+  const infoOnly = info === "1";
   const provider = await getCatalogProvider();
   if (!provider.isEnabled()) {
     return (
@@ -43,7 +49,7 @@ export default async function GameDetailPage({
 
   const [game, rommPlatforms] = await Promise.all([
     provider.getById(id),
-    loadRommPlatforms(),
+    infoOnly ? Promise.resolve<RommPlatformOption[]>([]) : loadRommPlatforms(),
   ]);
   if (!game) notFound();
 
@@ -99,12 +105,14 @@ export default async function GameDetailPage({
           ))}
         </div>
 
-        <DownloadPanel
-          game={{ id: game.id, name: game.name, coverUrl: game.coverUrl }}
-          rommPlatforms={rommPlatforms}
-          suggestedSlug={suggestedSlug}
-          platformSlugs={igdbSlugs}
-        />
+        {!infoOnly && (
+          <DownloadPanel
+            game={{ id: game.id, name: game.name, coverUrl: game.coverUrl }}
+            rommPlatforms={rommPlatforms}
+            suggestedSlug={suggestedSlug}
+            platformSlugs={igdbSlugs}
+          />
+        )}
       </div>
     </div>
   );

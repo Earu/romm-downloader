@@ -24,6 +24,8 @@ export interface MinervaSearchResult {
   /** Inferred RomM platform (present when resolvable from the path). */
   platformSlug?: string;
   platformName?: string;
+  /** File size in bytes, looked up from hashes.db (best-effort). */
+  size?: number;
 }
 
 export interface SearchOptions {
@@ -141,7 +143,48 @@ export async function search(
   }
 
   matches.sort((a, b) => b.score - a.score);
-  return matches.slice(0, limit).map(({ score: _score, ...r }) => r);
+  const top = matches.slice(0, limit).map(({ score: _score, ...r }) => r);
+  await attachSizes(top);
+  // Drop sub-1KB entries. Nothing playable is that small (the smallest real ROMs,
+  // Atari 2600, are 2KB+), so this only removes archive noise that masquerades as
+  // a game under the same display name: PS3 "Disc Keys" (~250-byte key zips),
+  // 0-byte aborted `*.aria2__temp` artifacts, MAME chip/artwork stubs, laserdisc
+  // .dat files, etc. Entries whose size is unknown (undefined — the lookup failed)
+  // are kept so a DB hiccup never empties the results.
+  return top.filter((r) => r.size == null || r.size >= MIN_SIZE_BYTES);
+}
+
+/** Below this, a Minerva entry is non-game noise, not a downloadable ROM. */
+const MIN_SIZE_BYTES = 1024;
+
+/**
+ * Fill in each result's `size` from hashes.db in a single batched query
+ * (full_path is indexed). Best-effort: leaves sizes undefined if the DB is
+ * missing/unsynced or the query fails, so search never breaks over size data.
+ */
+async function attachSizes(results: MinervaSearchResult[]): Promise<void> {
+  if (results.length === 0) return;
+  const dbUrl = `file:${MINERVA_DB_PATH.replace(/\\/g, "/")}`;
+  const db = createClient({ url: dbUrl });
+  try {
+    const placeholders = results.map(() => "?").join(",");
+    const rs = await db.execute({
+      sql: `SELECT full_path, size FROM files WHERE full_path IN (${placeholders})`,
+      args: results.map((r) => r.fullPath),
+    });
+    const sizeByPath = new Map<string, number>();
+    for (const row of rs.rows) {
+      if (row.size != null) sizeByPath.set(String(row.full_path), Number(row.size));
+    }
+    for (const r of results) {
+      const size = sizeByPath.get(r.fullPath);
+      if (size != null) r.size = size;
+    }
+  } catch {
+    // Best-effort — fall through with sizes unset.
+  } finally {
+    db.close();
+  }
 }
 
 /**

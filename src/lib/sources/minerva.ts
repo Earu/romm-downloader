@@ -63,6 +63,7 @@ export const minervaSource: SourceProvider = {
         platformSlug: r.platformSlug,
         platformName: r.platformName,
         region,
+        size: r.size,
       };
     });
   },
