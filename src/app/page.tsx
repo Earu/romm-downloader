@@ -155,7 +155,9 @@ export default function CatalogPage() {
                       return (
                         <GameCard
                           key={g.id}
-                          href={rom ? `/rom/${rom.id}` : `/game/${g.id}`}
+                          // Always the catalog page so an installed game can still be
+                          // installed for another platform (source/platform picker).
+                          href={`/game/${g.id}`}
                           name={g.name}
                           coverUrl={g.coverUrl}
                           subtitle={g.releaseYear ? String(g.releaseYear) : undefined}

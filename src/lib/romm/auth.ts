@@ -23,6 +23,8 @@ function basic(username: string, password: string): string {
 export interface RommUser {
   username: string;
   role?: string;
+  /** RomM avatar asset path (relative to /api/raw/assets); empty when unset. */
+  avatarPath?: string;
 }
 
 /** Validate username/password against RomM. Returns the user, or null if invalid. */
@@ -44,8 +46,8 @@ export async function rommValidateLogin(
     cache: "no-store",
   });
   if (!me.ok) return { username };
-  const u = (await me.json()) as { username?: string; role?: string };
-  return { username: u.username ?? username, role: u.role };
+  const u = (await me.json()) as { username?: string; role?: string; avatar_path?: string };
+  return { username: u.username ?? username, role: u.role, avatarPath: u.avatar_path || undefined };
 }
 
 /** Whether an existing client token still authenticates against RomM. */

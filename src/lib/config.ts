@@ -1,5 +1,6 @@
 import "server-only";
 import { eq } from "drizzle-orm";
+import { decryptSecret } from "@/lib/crypto/secrets";
 import { db } from "@/lib/db";
 import { settings } from "@/lib/db/schema";
 
@@ -65,14 +66,16 @@ export async function getConfig(): Promise<AppConfig> {
   try {
     const row = await db.select().from(settings).where(eq(settings.id, 1)).get();
     if (!row) return env;
+    // Secret columns are stored encrypted-at-rest; decrypt before use. Legacy
+    // plaintext rows pass through unchanged (see lib/crypto/secrets).
     return {
       rommUrl: row.rommUrl || env.rommUrl,
-      rommToken: row.rommToken || env.rommToken,
+      rommToken: decryptSecret(row.rommToken) || env.rommToken,
       debridProvider: row.debridProvider || env.debridProvider,
-      debridApiKey: row.debridApiKey || env.debridApiKey,
+      debridApiKey: decryptSecret(row.debridApiKey) || env.debridApiKey,
       maxDebridGb: row.maxDebridGb ?? env.maxDebridGb,
       igdbClientId: row.igdbClientId || env.igdbClientId,
-      igdbClientSecret: row.igdbClientSecret || env.igdbClientSecret,
+      igdbClientSecret: decryptSecret(row.igdbClientSecret) || env.igdbClientSecret,
       downloadTmpDir: row.downloadTmpDir || env.downloadTmpDir,
       rommLibraryPath: env.rommLibraryPath,
       // A saved row (even empty CSV) takes precedence so toggling all sources back
@@ -90,4 +93,22 @@ export async function getConfig(): Promise<AppConfig> {
 /** Strip trailing slash so we can append `/api/...` cleanly. */
 export function normalizeBaseUrl(url: string): string {
   return url.replace(/\/+$/, "");
+}
+
+/**
+ * The RomM URL the server is pinned to, or null on a fresh install. When non-null
+ * the login endpoint ignores the URL typed in the login form (SSRF guard) and the
+ * login form shows the field as read-only. "Pinned" means a value was explicitly
+ * configured — a saved settings row or the ROMM_URL env var (row wins).
+ */
+export async function getPinnedRommUrl(): Promise<string | null> {
+  let rowUrl: string | null | undefined;
+  try {
+    const row = await db.select().from(settings).where(eq(settings.id, 1)).get();
+    rowUrl = row?.rommUrl;
+  } catch {
+    // DB not migrated yet — fall back to env only.
+  }
+  const pinned = rowUrl || process.env.ROMM_URL || null;
+  return pinned ? normalizeBaseUrl(pinned) : null;
 }

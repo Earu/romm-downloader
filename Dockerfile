@@ -23,18 +23,26 @@ ENV NODE_ENV=production \
 
 # aria2 powers the built-in torrent fallback (selective single-file download
 # from Minerva's bundle torrents, which TorBox can't serve). p7zip (7za) extracts
-# disc images from .zip/.7z archives (Vimm serves disc games as .7z).
-RUN apk add --no-cache aria2 p7zip
+# disc images from .zip/.7z archives (Vimm serves disc games as .7z). openssl
+# generates the AUTH_SECRET on first run (see entrypoint.sh).
+RUN apk add --no-cache aria2 p7zip openssl
 
 # Standalone server + static assets + migrations.
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/drizzle ./drizzle
+COPY entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
 
-# Persist DB + in-flight downloads.
-RUN mkdir -p /app/data/downloads
+# Persist DB + in-flight downloads. Run as a non-root user; it owns the data dir
+# so the entrypoint can write the persisted AUTH_SECRET and the app can write the DB.
+RUN mkdir -p /app/data/downloads \
+    && addgroup -S app && adduser -S app -G app \
+    && chown -R app:app /app/data
+USER app
 VOLUME ["/app/data"]
 
 EXPOSE 3000
+ENTRYPOINT ["/app/entrypoint.sh"]
 CMD ["node", "server.js"]

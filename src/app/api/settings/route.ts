@@ -1,7 +1,9 @@
 import { eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { requireAdmin } from "@/lib/auth/guard";
 import { getConfig } from "@/lib/config";
+import { encryptSecret } from "@/lib/crypto/secrets";
 import { db } from "@/lib/db";
 import { settings } from "@/lib/db/schema";
 
@@ -9,11 +11,13 @@ export const dynamic = "force-dynamic";
 
 /**
  * Return the EFFECTIVE settings (env merged with the saved DB row) so the form
- * reflects values configured via environment variables too. Secrets are returned
- * in full to pre-fill the (password) inputs — this is an unauthenticated,
- * self-hosted admin tool, so anyone who can reach it can read its config anyway.
+ * reflects values configured via environment variables too. Admin-only: this
+ * exposes stored secrets in full to pre-fill the (password) inputs, so non-admin
+ * users (and unauthenticated callers) must not reach it.
  */
 export async function GET() {
+  const gate = await requireAdmin();
+  if (gate instanceof NextResponse) return gate;
   const cfg = await getConfig();
   return NextResponse.json({
     rommUrl: cfg.rommUrl,
@@ -47,6 +51,8 @@ const bodySchema = z.object({
  * secrets so masked values aren't accidentally cleared on save.
  */
 export async function POST(req: Request) {
+  const gate = await requireAdmin();
+  if (gate instanceof NextResponse) return gate;
   const parsed = bodySchema.safeParse(await req.json());
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
@@ -54,8 +60,10 @@ export async function POST(req: Request) {
   const input = parsed.data;
   const existing = await db.select().from(settings).where(eq(settings.id, 1)).get();
 
+  // Empty/undefined => keep the (already-encrypted) current value; a new value is
+  // encrypted before storage (encryption-at-rest, see lib/crypto/secrets).
   const keepSecret = (incoming: string | undefined, current: string | null | undefined) =>
-    incoming === undefined || incoming === "" ? (current ?? null) : incoming;
+    incoming === undefined || incoming === "" ? (current ?? null) : encryptSecret(incoming);
 
   const values = {
     id: 1 as const,
