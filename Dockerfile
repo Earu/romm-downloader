@@ -35,12 +35,11 @@ COPY --from=builder /app/drizzle ./drizzle
 COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
-# Persist DB + in-flight downloads. Run as a non-root user; it owns the data dir
-# so the entrypoint can write the persisted AUTH_SECRET and the app can write the DB.
-RUN mkdir -p /app/data/downloads \
-    && addgroup -S app && adduser -S app -G app \
-    && chown -R app:app /app/data
-USER app
+# Persist DB + in-flight downloads. Runs as root: the optional shared-library
+# feature (ROMM_LIBRARY_PATH) writes into RomM's library volume, which RomM owns
+# as root (mode 755) — so the app must be root to create files there. Since the
+# RomM stack already runs as root, this keeps ownership consistent.
+RUN mkdir -p /app/data/downloads
 VOLUME ["/app/data"]
 
 EXPOSE 3000
