@@ -1,9 +1,14 @@
 import { LoginForm } from "@/components/LoginForm";
-import { getConfig } from "@/lib/config";
+import { getConfig, getPinnedRommUrl } from "@/lib/config";
 
 export const dynamic = "force-dynamic";
 
 export default async function LoginPage() {
-  const cfg = await getConfig();
-  return <LoginForm defaultUrl={cfg.rommUrl || "http://localhost:8080"} />;
+  const [cfg, pinned] = await Promise.all([getConfig(), getPinnedRommUrl()]);
+  return (
+    <LoginForm
+      defaultUrl={pinned ?? cfg.rommUrl ?? "http://localhost:8080"}
+      pinned={Boolean(pinned)}
+    />
+  );
 }

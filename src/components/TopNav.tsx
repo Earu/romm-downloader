@@ -15,27 +15,113 @@ function isActive(pathname: string, href: string): boolean {
   return href === "/" ? pathname === "/" : pathname.startsWith(href);
 }
 
-export function TopNav() {
-  const pathname = usePathname() ?? "/";
-  const router = useRouter();
-  const [username, setUsername] = useState<string | null>(null);
+// RomM has no separate display name, so the initial comes from the username.
+function initial(name: string): string {
+  return name.trim().charAt(0).toUpperCase() || "?";
+}
 
-  useEffect(() => {
-    let active = true;
-    fetch("/api/auth/session", { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => active && setUsername(d?.username ?? null))
-      .catch(() => {});
-    return () => {
-      active = false;
-    };
-  }, [pathname]);
+/** Square avatar (real RomM image, or the user's initial) with a blue border. */
+function Avatar({ username, hasAvatar }: { username: string; hasAvatar: boolean }) {
+  const [imgError, setImgError] = useState(false);
+  const showImage = hasAvatar && !imgError;
+  return (
+    <span
+      className="flex h-8 w-8 items-center justify-center overflow-hidden border border-steam-blue bg-steam-panel-2 text-sm font-bold text-steam-text"
+      title={username}
+    >
+      {showImage ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src="/api/me/avatar"
+          alt=""
+          className="h-full w-full object-cover"
+          onError={() => setImgError(true)}
+        />
+      ) : (
+        initial(username)
+      )}
+    </span>
+  );
+}
+
+/** Avatar · username (· admin star) · log out icon. */
+function UserNav({
+  username,
+  role,
+  hasAvatar,
+}: {
+  username: string;
+  role?: string;
+  hasAvatar: boolean;
+}) {
+  const router = useRouter();
+  const isAdmin = role?.toLowerCase() === "admin";
 
   const logout = async () => {
     await fetch("/api/auth/logout", { method: "POST" });
     router.replace("/login");
     router.refresh();
   };
+
+  return (
+    <div className="flex items-center gap-2.5">
+      <Avatar username={username} hasAvatar={hasAvatar} />
+      <span className="flex items-center gap-1.5 text-[15px] font-semibold capitalize text-steam-text">
+        {username}
+        {isAdmin && (
+          <span title="Administrator" className="inline-flex text-yellow-400" aria-label="Administrator">
+            <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5" aria-hidden="true">
+              <path d="M10 1.5l2.47 5.01 5.53.8-4 3.9.94 5.49L10 14.98l-4.95 2.6.94-5.48-4-3.9 5.53-.8L10 1.5z" />
+            </svg>
+          </span>
+        )}
+      </span>
+      <button
+        type="button"
+        onClick={logout}
+        title="Log out"
+        aria-label="Log out"
+        className="ml-0.5 flex cursor-pointer items-center text-white transition hover:text-red-500"
+      >
+        <svg viewBox="0 0 20 20" fill="currentColor" className="h-[18px] w-[18px]" aria-hidden="true">
+          <path
+            fillRule="evenodd"
+            d="M3 4.25A2.25 2.25 0 0 1 5.25 2h4.5a.75.75 0 0 1 0 1.5h-4.5a.75.75 0 0 0-.75.75v11.5c0 .414.336.75.75.75h4.5a.75.75 0 0 1 0 1.5h-4.5A2.25 2.25 0 0 1 3 15.75V4.25Zm10.72 2.47a.75.75 0 0 1 1.06 0l3 3a.75.75 0 0 1 0 1.06l-3 3a.75.75 0 1 1-1.06-1.06l1.72-1.72H8.75a.75.75 0 0 1 0-1.5h6.69l-1.72-1.72a.75.75 0 0 1 0-1.06Z"
+            clipRule="evenodd"
+          />
+        </svg>
+      </button>
+    </div>
+  );
+}
+
+export function TopNav() {
+  const pathname = usePathname() ?? "/";
+  const [user, setUser] = useState<{
+    username: string;
+    role?: string;
+    hasAvatar: boolean;
+  } | null>(null);
+
+  useEffect(() => {
+    // No chrome (and no session) on the login screen — skip the probe there.
+    if (pathname === "/login") return;
+    let active = true;
+    fetch("/api/auth/session", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!active) return;
+        setUser(
+          d?.username
+            ? { username: d.username, role: d.role, hasAvatar: Boolean(d.avatarPath) }
+            : null,
+        );
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [pathname]);
 
   // No chrome on the login screen.
   if (pathname === "/login") return null;
@@ -71,18 +157,10 @@ export function TopNav() {
           })}
         </div>
 
-        <div className="flex items-center gap-3 justify-self-end">
-          {username && (
-            <span className="text-sm text-steam-muted">
-              {username}
-            </span>
+        <div className="flex items-center justify-self-end">
+          {user && (
+            <UserNav username={user.username} role={user.role} hasAvatar={user.hasAvatar} />
           )}
-          <button
-            onClick={logout}
-            className="text-sm font-medium text-steam-muted transition hover:text-steam-text"
-          >
-            Log out
-          </button>
         </div>
       </nav>
     </header>

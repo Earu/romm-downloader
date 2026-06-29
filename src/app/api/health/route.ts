@@ -21,10 +21,10 @@ export async function GET() {
       const client = new RommClient({ baseUrl: cfg.rommUrl, token: cfg.rommToken });
       const hb = await client.heartbeat();
       if (cfg.rommToken) {
-        const me = await client.me();
-        romm.detail = `v${hb.SYSTEM.VERSION}, authed as ${me.username}`;
+        await client.me(); // validates the token (throws on auth failure → "error")
+        romm.detail = `v${hb.SYSTEM.VERSION}`;
       } else {
-        romm.detail = `v${hb.SYSTEM.VERSION}, no token`;
+        romm.detail = `v${hb.SYSTEM.VERSION} · no token`;
       }
       romm.ok = Boolean(cfg.rommToken);
     } catch (e) {
@@ -38,21 +38,17 @@ export async function GET() {
     try {
       await provider.ping();
       debrid.ok = true;
-      debrid.detail = `${provider.label} key valid`;
     } catch (e) {
       debrid.detail = `${provider.label}: ${e instanceof Error ? e.message : String(e)}`;
     }
-  } else {
-    debrid.detail = "none — downloads use the built-in torrent client";
   }
+  // No provider → leave detail empty; the badge already shows "not configured".
 
+  const igdbConfigured = Boolean(cfg.igdbClientId && cfg.igdbClientSecret);
   const igdb: ServiceHealth = {
-    configured: Boolean(cfg.igdbClientId && cfg.igdbClientSecret),
-    ok: Boolean(cfg.igdbClientId && cfg.igdbClientSecret),
-    detail:
-      cfg.igdbClientId && cfg.igdbClientSecret
-        ? "credentials present"
-        : "set IGDB_CLIENT_ID/SECRET to enable catalog",
+    configured: igdbConfigured,
+    ok: igdbConfigured,
+    detail: igdbConfigured ? undefined : "Set IGDB_CLIENT_ID/SECRET to enable catalog.",
   };
 
   return NextResponse.json({ romm, debrid, igdb });

@@ -17,9 +17,9 @@ export function GameCard({ href, name, coverUrl, subtitle, platforms, installed 
   return (
     <Link
       href={href}
-      className="group block overflow-hidden bg-steam-deep shadow-[0_2px_8px_rgba(0,0,0,0.5)] ring-2 ring-transparent transition duration-150 hover:z-10 hover:scale-[1.04] hover:ring-white hover:shadow-[0_8px_24px_rgba(0,0,0,0.65)]"
+      className="group flex h-full flex-col overflow-hidden bg-steam-deep shadow-[0_2px_8px_rgba(0,0,0,0.5)] ring-2 ring-transparent transition duration-150 hover:z-10 hover:scale-[1.04] hover:ring-white hover:shadow-[0_8px_24px_rgba(0,0,0,0.65)]"
     >
-      <div className="relative aspect-[3/4] w-full overflow-hidden bg-black/50">
+      <div className="relative aspect-[3/4] w-full shrink-0 overflow-hidden bg-black/50">
         {coverUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={coverUrl} alt={name} className="h-full w-full object-cover" loading="lazy" />
@@ -38,7 +38,7 @@ export function GameCard({ href, name, coverUrl, subtitle, platforms, installed 
         )}
       </div>
 
-      <div className="bg-steam-row px-2.5 py-2 text-center">
+      <div className="flex-1 bg-steam-row px-2.5 py-2 text-center">
         <p className="truncate text-sm font-bold text-steam-bright" title={name}>
           {name}
         </p>

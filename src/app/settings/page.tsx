@@ -127,16 +127,25 @@ function GroupTitle({ children }: { children: React.ReactNode }) {
 }
 
 /** Sliding on/off switch (the app's toggle convention). */
-function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
+function Toggle({
+  checked,
+  onChange,
+  disabled,
+}: {
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  disabled?: boolean;
+}) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={checked}
+      disabled={disabled}
       onClick={() => onChange(!checked)}
       className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition ${
         checked ? "bg-steam-blue" : "bg-black/50"
-      }`}
+      } ${disabled ? "cursor-not-allowed opacity-50" : ""}`}
     >
       <span
         className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition ${
@@ -171,6 +180,8 @@ export default function SettingsPage() {
   const [firmwareAutoInstall, setFirmwareAutoInstall] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
+  // /api/settings is admin-only; non-admins get 403 and see a read-only notice.
+  const [canEditSettings, setCanEditSettings] = useState(true);
   const [minerva, setMinerva] = useState<MinervaStatus | null>(null);
   const [firmware, setFirmware] = useState<FirmwareStatus | null>(null);
   const [firmwareBusy, setFirmwareBusy] = useState(false);
@@ -187,6 +198,10 @@ export default function SettingsPage() {
 
   const loadSettings = useCallback(async () => {
     const res = await fetch("/api/settings", { cache: "no-store" });
+    if (res.status === 401 || res.status === 403) {
+      setCanEditSettings(false);
+      return;
+    }
     const data: SettingsView = await res.json();
     setForm({
       debridProvider: data.debridProvider || "none",
@@ -340,16 +355,22 @@ export default function SettingsPage() {
           <div>
             <h1 className="mb-1 text-xl font-bold text-steam-bright">Connections</h1>
             <p className="mb-4 text-xs text-steam-muted">
-              Values here override environment variables. Leave secret fields blank to keep the
-              current value (shown masked).
+              Leave secret fields blank to keep the current value.
             </p>
+
+            {!canEditSettings && (
+              <div className="mb-4 bg-steam-row px-4 py-3 text-xs text-amber-300">
+                Connection settings are managed by an administrator and can only be viewed or
+                changed by a RomM admin account.
+              </div>
+            )}
 
             <GroupTitle>ROM sources</GroupTitle>
             <div className="space-y-1">
               {SOURCE_OPTIONS.map((s) => {
                 const enabled = !disabledSources.includes(s.id);
                 return (
-                  <Row key={s.id} label={s.label} desc="Search this source when looking for a ROM.">
+                  <Row key={s.id} label={s.label}>
                     <Toggle
                       checked={enabled}
                       onChange={(on) =>
@@ -365,7 +386,7 @@ export default function SettingsPage() {
 
             <GroupTitle>Debrid provider</GroupTitle>
             <div className="space-y-1">
-              <Row label="Provider" desc="Which debrid service to use, if any.">
+              <Row label="Provider" desc="Optional service to download torrents.">
                 <select
                   value={form.debridProvider ?? "none"}
                   onChange={(e) =>
@@ -387,7 +408,7 @@ export default function SettingsPage() {
                   </Row>
                   <Row
                     label="Max size (GB)"
-                    desc="Files larger than this skip the debrid provider and offer the built-in torrent client."
+                    desc="Larger files use the built-in torrent client instead."
                   >
                     {input("maxDebridGb", "30", "number")}
                   </Row>
@@ -395,7 +416,7 @@ export default function SettingsPage() {
               )}
             </div>
 
-            <GroupTitle>IGDB (catalog metadata)</GroupTitle>
+            <GroupTitle>Catalog metadata</GroupTitle>
             <div className="space-y-1">
               <Row label="Client ID">{input("igdbClientId", "")}</Row>
               <Row label="Client Secret">
@@ -405,11 +426,15 @@ export default function SettingsPage() {
 
             <GroupTitle>Storage</GroupTitle>
             <div className="space-y-1">
-              <Row label="Download temp dir">{input("downloadTmpDir", "./data/downloads")}</Row>
+              <Row label="Download folder">{input("downloadTmpDir", "./data/downloads")}</Row>
             </div>
 
             <div className="mt-5">
-              <button onClick={save} disabled={saving} className="steam-btn-green">
+              <button
+                onClick={save}
+                disabled={saving || !canEditSettings}
+                className="steam-btn-green"
+              >
                 {saving ? "Saving…" : "Save settings"}
               </button>
             </div>
@@ -425,8 +450,7 @@ export default function SettingsPage() {
               </button>
             </div>
             <p className="mb-4 text-xs text-steam-muted">
-              Caches the Minerva search index + ~1.76 GB magnet database locally. Auto-refreshes
-              about monthly; use “Update now” to refresh manually.
+              Local copy of the Minerva ROM index. Refreshes automatically.
             </p>
 
             {minerva?.syncing && (
@@ -483,8 +507,7 @@ export default function SettingsPage() {
               </button>
             </div>
             <p className="mb-4 text-xs text-steam-muted">
-              Verified BIOS via RetroBIOS, uploaded to matching RomM platforms. Switch keys
-              aren&apos;t included.
+              BIOS uploaded to matching RomM platforms.
             </p>
 
             {fwWorking && (
@@ -497,10 +520,11 @@ export default function SettingsPage() {
             <div className="space-y-1">
               <Row
                 label="Auto-install firmware"
-                desc="Upload missing BIOS to RomM platforms automatically."
+                desc="Automatically upload missing BIOS."
               >
                 <Toggle
                   checked={firmwareAutoInstall}
+                  disabled={!canEditSettings}
                   onChange={(v) => {
                     setFirmwareAutoInstall(v);
                     void fetch("/api/settings", {

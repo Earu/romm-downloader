@@ -40,14 +40,35 @@ separate download/install bars); failed jobs can be retried.
 ## Authentication
 
 The entire app is gated behind your RomM login (Next.js `middleware.ts`). On the
-login screen you enter your **RomM URL** (pre-filled, editable), **username**, and
-**password**. The app validates them against RomM (`POST /api/login`) and
-**auto-provisions a non-expiring client token**. A
-signed JWT session cookie keeps you logged in; the nav shows your username and a
-**Log out** button.
+login screen you enter your **RomM URL**, **username**, and **password**. The app
+validates them against RomM (`POST /api/login`) and **auto-provisions a
+non-expiring client token**. A signed JWT session cookie (7 days,
+`HttpOnly`/`SameSite=Strict`) keeps you logged in; the nav shows your username and
+a **Log out** button.
 
-Set `AUTH_SECRET` to sign session cookies (an insecure dev fallback is used if it
-isn't set — fine for local dev, **set it in production**).
+Access to stored credentials and settings (**Settings → Connections**, and the
+`/api/settings` endpoint) is **admin-only** — non-admin RomM users can use the app
+but can't read secrets or change global configuration. Secrets (RomM token, debrid
+key, IGDB secret) are **encrypted at rest** in the SQLite DB.
+
+**`AUTH_SECRET`** signs the session cookies. In the Docker image it's
+**auto-generated and persisted** to `/app/data/.auth_secret` on first run, so no
+setup is needed and sessions survive restarts. Set it explicitly via env to
+override (e.g. to share one secret across replicas). For local `npm run dev`
+(outside Docker) a static dev fallback is used if it's unset.
+
+> ⚠️ **Once configured, the RomM URL is pinned to server config.** To prevent SSRF
+> on the public login endpoint, the URL typed on the login form is only honored on
+> a fresh install; after the first successful login (or if `ROMM_URL` is set) the
+> app always uses the configured RomM URL and ignores the form value.
+
+### Exposing this publicly
+
+This app can be put on the internet, but only behind a **TLS-terminating reverse
+proxy** (the `Secure` cookie flag is set only when the request is HTTPS). The
+proxy must forward `X-Forwarded-Proto` and `X-Forwarded-For` (the login endpoint
+rate-limits per client IP). Set `ROMM_URL` so the RomM target is pinned, and keep
+the `/app/data` volume (which holds `AUTH_SECRET` and the encrypted DB) private.
 
 ## Debrid providers
 

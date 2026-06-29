@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Logo } from "@/components/icons";
 
-export function LoginForm({ defaultUrl }: { defaultUrl: string }) {
+export function LoginForm({ defaultUrl, pinned = false }: { defaultUrl: string; pinned?: boolean }) {
   const router = useRouter();
   const [rommUrl, setRommUrl] = useState(defaultUrl || "http://localhost:8080");
   const [username, setUsername] = useState("");
@@ -55,8 +55,26 @@ export function LoginForm({ defaultUrl }: { defaultUrl: string }) {
             value={rommUrl}
             onChange={(e) => setRommUrl(e.target.value)}
             placeholder="http://localhost:8080"
-            className="steam-input w-full"
+            disabled={pinned}
+            readOnly={pinned}
+            aria-disabled={pinned}
+            title={pinned ? "Managed by your administrator" : undefined}
+            className={`steam-input w-full ${
+              pinned ? "cursor-not-allowed opacity-60" : ""
+            }`}
           />
+          {pinned && (
+            <span className="mt-1 flex items-center gap-1 text-xs text-steam-muted">
+              <svg viewBox="0 0 20 20" fill="currentColor" className="h-3 w-3" aria-hidden="true">
+                <path
+                  fillRule="evenodd"
+                  d="M10 1a4 4 0 0 0-4 4v2H5a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7a2 2 0 0 0-2-2h-1V5a4 4 0 0 0-4-4Zm2 6V5a2 2 0 1 0-4 0v2h4Z"
+                  clipRule="evenodd"
+                />
+              </svg>
+              Managed by your administrator
+            </span>
+          )}
         </label>
         <label className="block">
           {field("Username")}
