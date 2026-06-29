@@ -15,6 +15,7 @@ next-env.d.ts
 # env / secrets
 .env
 .env*.local
+.env.bak*
 romm/.env
 
 # local db / downloads
